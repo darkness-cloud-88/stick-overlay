@@ -12,6 +12,7 @@ class Fig(val team: Int, val slot: Int, val name: String, val mood: Int, val p: 
     var grab: PointF? = null
     var say = ""; var sayT = 0
     var wx = 0f; var wt = 0
+    var sit = 0; var idleT = 300
     var handle: View? = null
     var hlp: WindowManager.LayoutParams? = null
     var hx = -1; var hy = -1; var hw = -1; var hh = -1
@@ -27,10 +28,17 @@ class StageView(ctx: Context) : View(ctx) {
     private val defNames = arrayOf("زيد", "سالم", "ليلى", "كرم", "نور", "هدى")
     private val slotMood = intArrayOf(0, 1, 2, 3, 0, 2)
     private val pokeLines = arrayOf(
-        arrayOf("أنا مستعد للقتال!", "من يتحدّاني؟"),
-        arrayOf("لا تؤذني!", "أرجوك.. ابتعد"),
-        arrayOf("هاها! جرّب مرة ثانية", "غيّرنا اللعبة!"),
-        arrayOf("دعني أنام...", "ليس الآن.."))
+        arrayOf("مرحباً صديقي!", "نعم؟ أنا هنا!"),
+        arrayOf("أوه! أهلاً..", "لقد أخفتني قليلاً"),
+        arrayOf("هاها! دغدغة!", "مرة ثانية!"),
+        arrayOf("مممم؟ أيقظتني..", "خمس دقائق فقط.."))
+    private val idleLines = arrayOf(
+        arrayOf("ما هذا؟ سأستكشفه!", "هل رأيت هذه الأيقونات؟", "أنا أحرس هاتفك!"),
+        arrayOf("هل أنت هنا؟", "أحب هذا الركن الهادئ", "لا تتركني وحدي.."),
+        arrayOf("لنلعب شيئاً!", "شاهد قفزتي!", "هاها! أنا أسرع منك"),
+        arrayOf("أشعر بالنعاس..", "هل حان وقت النوم؟", "سأرتاح قليلاً"))
+    private val showLines = arrayOf("شاهد هذا!", "انظر ماذا أفعل!", "أنا أتدرب فقط", "لا تقلق، لن أؤذي أحداً")
+    private val fightLines = arrayOf("أنا مستعد!", "أرجوك لا تؤلمني..", "هيا نلعب بقوة!", "حسناً.. لكن بسرعة")
     private val hurtLines = arrayOf("هذا لا يؤلم!", "آآه! كفى!", "هاها! أخطأت!", "آه.. أنا نعسان")
     private val off = arrayOf(
         floatArrayOf(0f, -44f), floatArrayOf(0f, -30f), floatArrayOf(0f, 0f), floatArrayOf(-12f, -20f),
@@ -53,10 +61,21 @@ class StageView(ctx: Context) : View(ctx) {
     private var bolt: List<PointF> = emptyList()
     private var last = 0L
     private var acc = 0f
+    var fight = false
     private val ground: Float get() = height - 56f * dn
 
     private fun rnd() = Math.random().toFloat()
     private fun say(f: Fig, t: String, n: Int) { f.say = t; f.sayT = n }
+
+    fun toggleFight(): Boolean {
+        fight = !fight
+        for (f in figs) if (f.hp > 0) {
+            f.sit = 0; f.target = null; f.atk = 0
+            if (fight) say(f, fightLines[f.mood], 70)
+            else { f.hp = 100f; f.burn = 0; f.frz = 0; say(f, "عدنا أصدقاء!", 60) }
+        }
+        return fight
+    }
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         super.onSizeChanged(w, h, ow, oh)
@@ -107,6 +126,8 @@ class StageView(ctx: Context) : View(ctx) {
                     if (!moved && e.eventTime - downT < 300 && f.hp > 0) {
                         val arr = pokeLines[f.mood]
                         say(f, arr[(rnd() * arr.size).toInt().coerceIn(0, arr.size - 1)], 80)
+                        f.sit = 0
+                        if (f.mood == 2) for (q in f.p) q.py += 7f * s
                     }
                 }
             }
@@ -148,6 +169,7 @@ class StageView(ctx: Context) : View(ctx) {
 
     private fun hit(f: Fig, d: Float, vx: Float, vy: Float, st: Int) {
         f.hp -= d
+        f.sit = 0
         f.stun = max(f.stun, st)
         for (q in f.p) { q.px -= vx; q.py -= vy }
         if (f.hp > 0 && f.sayT <= 0 && rnd() < .3f) say(f, hurtLines[f.mood], 50)
@@ -157,6 +179,23 @@ class StageView(ctx: Context) : View(ctx) {
         val alive = figs.filter { it.hp > 0 }
         if (alive.isEmpty()) return
         val user = alive.random()
+        if (!fight) {
+            val x = (user.p[2].x + user.face * 110f * s).coerceIn(30f, max(30f, width - 30f))
+            val y = ground - 30f * s
+            say(user, showLines[(rnd() * showLines.size).toInt().coerceIn(0, showLines.size - 1)], 70)
+            when (kind) {
+                "bolt" -> {
+                    val pts = ArrayList<PointF>()
+                    for (i in 0..8) pts.add(PointF(if (i == 8) x else x + (rnd() - .5f) * 40f * s, y * i / 8f))
+                    bolt = pts; boltL = 9; flash = 3
+                    part(x, y, 0xFFFFF27A.toInt(), 12, 6f)
+                }
+                "fire" -> part(x, y, 0xFFFF8A1F.toInt(), 22, 6f)
+                "ice" -> { rings.add(Ring(x, y, 10f * s, 90f * s, 0xFF7FD4FF.toInt())); part(x, y, 0xFFBFEAFF.toInt(), 14, 5f) }
+                "blast" -> { rings.add(Ring(x, y, 10f * s, 120f * s, 0xFFFF9A3C.toInt())); part(x, y, 0xFFFFB347.toInt(), 18, 8f) }
+            }
+            return
+        }
         val tg = user.target?.takeIf { it.hp > 0 } ?: alive.firstOrNull { it.team != user.team } ?: return
         val x = tg.p[2].x
         val y = tg.p[2].y
@@ -209,12 +248,14 @@ class StageView(ctx: Context) : View(ctx) {
         if (f.stun > 0) f.stun--
         if (f.cd > 0) f.cd--
         if (f.sayT > 0) f.sayT--
+        if (f.idleT > 0) f.idleT--
         val gr = f.grab
         if (gr != null && f.hp > 0) {
             val nk = p[1]
             nk.x += (gr.x - nk.x) * .5f
             nk.y += (gr.y - nk.y) * .5f
             f.stun = max(f.stun, 8)
+            f.sit = 0
         }
         val frozen = f.frz > 0
         if (frozen) { f.frz--; for (q in p) { q.px = q.x; q.py = q.y } }
@@ -226,20 +267,24 @@ class StageView(ctx: Context) : View(ctx) {
         val w = width.toFloat()
         if (f.hp > 0 && f.stun <= 0 && !frozen) {
             val hip = p[2]; val hd = p[0]; val nk = p[1]
-            if (hip.y > g - 75f * s) hip.y += ((g - 40f * s) - hip.y) * .2f
+            val sit = f.sit > 0 && f.target == null
+            val hh = if (sit) 24f else 40f
+            if (hip.y > g - 75f * s) hip.y += ((g - hh * s) - hip.y) * .2f
             nk.x += (hip.x - nk.x) * .25f; nk.y += ((hip.y - 30f * s) - nk.y) * .25f
             hd.x += (hip.x - hd.x) * .25f; hd.y += ((hip.y - 44f * s) - hd.y) * .25f
-            f.tt--
-            if (f.tt <= 0) {
-                f.tt = 15
-                var b: Fig? = null
-                var bd = 1e9f
-                for (o in figs) if (o.team != f.team && o.hp > 0) {
-                    val d = abs(o.p[2].x - hip.x)
-                    if (d < bd) { bd = d; b = o }
+            if (fight) {
+                f.tt--
+                if (f.tt <= 0) {
+                    f.tt = 15
+                    var b: Fig? = null
+                    var bd = 1e9f
+                    for (o in figs) if (o.team != f.team && o.hp > 0) {
+                        val d = abs(o.p[2].x - hip.x)
+                        if (d < bd) { bd = d; b = o }
+                    }
+                    f.target = b
                 }
-                f.target = b
-            }
+            } else f.target = null
             val spd = when (f.mood) { 0 -> 1.6f; 1 -> 1.3f; 2 -> 2.0f; else -> .9f }
             val cdMax = when (f.mood) { 0 -> 40; 1 -> 70; 2 -> 45; else -> 80 }
             val dmg = when (f.mood) { 0 -> 11f; 1 -> 6f; 2 -> 8f; else -> 9f }
@@ -254,23 +299,42 @@ class StageView(ctx: Context) : View(ctx) {
                 if (!flee && abs(dx) < 52f * s && abs(tg.p[2].y - hip.y) < 60f * s && f.cd <= 0 && f.atk <= 0) { f.atk = 14; f.cd = cdMax }
             } else {
                 f.wt--
-                if (f.wt <= 0) { f.wx = w * (.15f + rnd() * .7f); f.wt = 120 + (rnd() * 200).toInt() }
-                val dx = f.wx - hip.x
-                if (abs(dx) > 20f * s) { dir = if (dx > 0f) 1f else -1f; f.face = dir; hip.x += dir * spd * .5f * s }
+                if (f.wt <= 0) {
+                    if (rnd() < .3f) { f.sit = 150 + (rnd() * 250).toInt(); f.wt = f.sit + 40 }
+                    else { f.wx = w * (.12f + rnd() * .76f); f.wt = 120 + (rnd() * 200).toInt() }
+                }
+                if (f.sit > 0) f.sit--
+                else {
+                    val dx = f.wx - hip.x
+                    if (abs(dx) > 20f * s) { dir = if (dx > 0f) 1f else -1f; f.face = dir; hip.x += dir * spd * .5f * s }
+                }
             }
             if (hip.x < w * .08f) hip.x += .8f * s
             if (hip.x > w * .92f) hip.x -= .8f * s
-            if (f.mood == 2 && rnd() < .004f && hip.y > g - 50f * s) { for (q in p) q.py += 11f * s }
+            if (!fight && f.idleT <= 0) {
+                f.idleT = 600 + (rnd() * 900).toInt()
+                if (f.sayT <= 0 && f.grab == null) {
+                    val arr = idleLines[f.mood]
+                    say(f, arr[(rnd() * arr.size).toInt().coerceIn(0, arr.size - 1)], 110)
+                }
+            }
+            if (f.mood == 2 && !sit && rnd() < .004f && hip.y > g - 50f * s) { for (q in p) q.py += 11f * s }
             if (dir != 0f) f.t += .22f
             for (sd in 0..1) {
                 val ph = f.t + sd * Math.PI.toFloat()
                 val lift = if (dir != 0f) max(0f, sin(ph)) * 12f * s else 0f
                 val ft = p[if (sd == 1) 10 else 8]
                 val kn = p[if (sd == 1) 9 else 7]
-                val tx = hip.x + (if (sd == 1) 9f else -9f) * s + (if (dir != 0f) cos(ph) * 10f * s * dir else 0f)
+                val tx = if (sit) hip.x + f.face * (if (sd == 1) 26f else 20f) * s
+                         else hip.x + (if (sd == 1) 9f else -9f) * s + (if (dir != 0f) cos(ph) * 10f * s * dir else 0f)
                 ft.x += (tx - ft.x) * .3f; ft.y += ((g - lift) - ft.y) * .4f
-                kn.x += (((hip.x + ft.x) / 2f + dir * 5f * s) - kn.x) * .25f
-                kn.y += (((hip.y + ft.y) / 2f) - kn.y) * .25f
+                if (sit) {
+                    kn.x += (((hip.x + ft.x) / 2f) - kn.x) * .25f
+                    kn.y += (((hip.y + ft.y) / 2f - 8f * s) - kn.y) * .25f
+                } else {
+                    kn.x += (((hip.x + ft.x) / 2f + dir * 5f * s) - kn.x) * .25f
+                    kn.y += (((hip.y + ft.y) / 2f) - kn.y) * .25f
+                }
             }
             val sh = p[1]
             for (sd in 0..1) {
@@ -347,9 +411,11 @@ class StageView(ctx: Context) : View(ctx) {
             for (l in lk) cv.drawLine(p[l[0]].x, p[l[0]].y, p[l[1]].x, p[l[1]].y, paint)
             cv.drawCircle(p[0].x, p[0].y, 10f * s, paint)
             if (f.hp > 0) {
-                fill.color = col[f.team]
-                val x0 = p[0].x - 17f * s
-                cv.drawRect(x0, p[0].y - 26f * s, x0 + 34f * s * f.hp.coerceIn(0f, 100f) / 100f, p[0].y - 22f * s, fill)
+                if (fight) {
+                    fill.color = col[f.team]
+                    val x0 = p[0].x - 17f * s
+                    cv.drawRect(x0, p[0].y - 26f * s, x0 + 34f * s * f.hp.coerceIn(0f, 100f) / 100f, p[0].y - 22f * s, fill)
+                }
                 cv.drawText(f.name, p[0].x, p[0].y - 31f * s, tp)
                 if (f.sayT > 0) {
                     val tw = bt.measureText(f.say)
