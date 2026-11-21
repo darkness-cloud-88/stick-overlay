@@ -62,6 +62,7 @@ class OverlayService : Service() {
         btn("🔥") { st.power("fire") }
         btn("❄️") { st.power("ice") }
         btn("💥") { st.power("blast") }
+        btn("🔧") { st.repair() }
         btn("✖") { stopSelf() }
         val pp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type,
