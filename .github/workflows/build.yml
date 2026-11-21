@@ -50,6 +50,7 @@ jobs:
             <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
             <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
             <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+            <uses-permission android:name="android.permission.INTERNET"/>
             <application android:label="رجال العصا" android:theme="@android:style/Theme.DeviceDefault.Light">
               <activity android:name=".MainActivity" android:exported="true">
                 <intent-filter>
