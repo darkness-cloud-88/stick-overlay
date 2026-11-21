@@ -1,7 +1,9 @@
 package com.stick.overlay
 import android.content.Context
 import android.graphics.*
+import android.graphics.drawable.GradientDrawable
 import android.view.*
+import android.widget.*
 import kotlin.math.*
 
 object Puppet {
@@ -9,6 +11,9 @@ object Puppet {
     private val dark = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
         colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setScale(.7f, .7f, .7f, 1f) })
     }
+    private val normH = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val darkH = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val darkM = ColorMatrix().apply { setScale(.7f, .7f, .7f, 1f) }
 
     private fun seg(cv: Canvas, b: Bitmap, i: Int, x1: Float, y1: Float, x2: Float, y2: Float, flip: Boolean, p: Paint) {
         val len = hypot(x2 - x1, y2 - y1)
@@ -23,25 +28,35 @@ object Puppet {
         cv.restore()
     }
 
-    fun draw(cv: Canvas, bm: Array<Bitmap>, jx: FloatArray, jy: FloatArray, face: Float, s: Float) {
+    fun draw(cv: Canvas, bm: Array<Bitmap>, jx: FloatArray, jy: FloatArray, face: Float, s: Float, hm: ColorMatrix? = null) {
+        val pn: Paint
+        val pd: Paint
+        if (hm == null) { pn = norm; pd = dark }
+        else {
+            normH.colorFilter = ColorMatrixColorFilter(hm)
+            val m = ColorMatrix(hm)
+            m.postConcat(darkM)
+            darkH.colorFilter = ColorMatrixColorFilter(m)
+            pn = normH; pd = darkH
+        }
         val fl = face < 0f
-        seg(cv, bm[2], 2, jx[1], jy[1], jx[3], jy[3], fl, dark)
-        seg(cv, bm[3], 3, jx[3], jy[3], jx[4], jy[4], fl, dark)
-        seg(cv, bm[4], 4, jx[2], jy[2], jx[7], jy[7], fl, dark)
-        seg(cv, bm[5], 5, jx[7], jy[7], jx[8], jy[8], fl, dark)
-        seg(cv, bm[1], 1, jx[1], jy[1], jx[2], jy[2], fl, norm)
+        seg(cv, bm[2], 2, jx[1], jy[1], jx[3], jy[3], fl, pd)
+        seg(cv, bm[3], 3, jx[3], jy[3], jx[4], jy[4], fl, pd)
+        seg(cv, bm[4], 4, jx[2], jy[2], jx[7], jy[7], fl, pd)
+        seg(cv, bm[5], 5, jx[7], jy[7], jx[8], jy[8], fl, pd)
+        seg(cv, bm[1], 1, jx[1], jy[1], jx[2], jy[2], fl, pn)
         val th = Math.toDegrees(atan2((jy[0] - jy[1]).toDouble(), (jx[0] - jx[1]).toDouble())).toFloat() + 90f
         cv.save()
         cv.translate(jx[1], jy[1])
         cv.rotate(th)
         if (fl) cv.scale(-1f, 1f)
         cv.scale(.2f * s, .2f * s)
-        cv.drawBitmap(bm[0], -Store.AX[0], -Store.AY[0], norm)
+        cv.drawBitmap(bm[0], -Store.AX[0], -Store.AY[0], pn)
         cv.restore()
-        seg(cv, bm[4], 4, jx[2], jy[2], jx[9], jy[9], fl, norm)
-        seg(cv, bm[5], 5, jx[9], jy[9], jx[10], jy[10], fl, norm)
-        seg(cv, bm[2], 2, jx[1], jy[1], jx[5], jy[5], fl, norm)
-        seg(cv, bm[3], 3, jx[5], jy[5], jx[6], jy[6], fl, norm)
+        seg(cv, bm[4], 4, jx[2], jy[2], jx[9], jy[9], fl, pn)
+        seg(cv, bm[5], 5, jx[9], jy[9], jx[10], jy[10], fl, pn)
+        seg(cv, bm[2], 2, jx[1], jy[1], jx[5], jy[5], fl, pn)
+        seg(cv, bm[3], 3, jx[5], jy[5], jx[6], jy[6], fl, pn)
     }
 
     fun standing(jx: FloatArray, jy: FloatArray, cx: Float, cy: Float, u: Float) {
@@ -59,11 +74,11 @@ object Puppet {
     }
 }
 
-class Fig(val id: String, val name: String, val mood: Int, val bm: Array<Bitmap>) {
+class Fig(val id: String, var name: String, val mood: Int, val bm: Array<Bitmap>) {
     val jx = FloatArray(11); val jy = FloatArray(11)
     val pjx = FloatArray(11); val pjy = FloatArray(11)
     val sx = FloatArray(11); val sy = FloatArray(11)
-    var x = 0f; var yoff = 0f; var vy = 0f
+    var x = 0f; var yoff = 0f; var vy = 0f; var plat = -1f
     var face = 1f; var t = 0f; var t2 = 0f
     var walk = 0f; var sit = 0f; var lie = 0f; var wave = 0f; var cast = 0f
     var mode = 1; var modeT = 0
@@ -76,6 +91,10 @@ class Fig(val id: String, val name: String, val mood: Int, val bm: Array<Bitmap>
     var fvx = 0f; var fvy = 0f
     var bl = 0f; var fxCd = 0; var crackCd = 0
     var greet = true
+    var busy = false
+    var lastTap = 0L
+    var hue = 0
+    var hm: ColorMatrix? = null
     var handle: View? = null
     var hlp: WindowManager.LayoutParams? = null
     var hx = -1; var hy = -1; var hw = -1; var hh = -1
@@ -87,6 +106,7 @@ class StageView(ctx: Context) : View(ctx) {
     private val dn = ctx.resources.displayMetrics.density
     private val s = dn * 1.05f
     private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    private val fxp = ctx.getSharedPreferences("stickfx", Context.MODE_PRIVATE)
     private val pokeLines = arrayOf(
         arrayOf("مرحباً صديقي!", "نعم؟ أنا هنا!"),
         arrayOf("أوه! أهلاً..", "لقد أخفتني قليلاً"),
@@ -129,6 +149,11 @@ class StageView(ctx: Context) : View(ctx) {
     private var bolt: List<PointF> = emptyList()
     private var last = 0L
     private var acc = 0f
+    private var menu: View? = null
+    private var finger = false
+    private var tDown = false
+    private var fx = 0f
+    private var fy = 0f
     private val ground: Float get() = height - 56f * dn
 
     private fun rnd() = Math.random().toFloat()
@@ -137,6 +162,18 @@ class StageView(ctx: Context) : View(ctx) {
     private fun say(f: Fig, t: String, n: Int) { f.say = t; f.sayT = n }
     private fun pick(a: Array<String>) = a[(rnd() * a.size).toInt().coerceIn(0, a.size - 1)]
 
+    private fun hueMatrix(deg: Int): ColorMatrix? {
+        if (deg == 0) return null
+        val a = Math.toRadians(deg.toDouble())
+        val c = cos(a).toFloat()
+        val sn = sin(a).toFloat()
+        return ColorMatrix(floatArrayOf(
+            .213f + c * .787f - sn * .213f, .715f - c * .715f - sn * .715f, .072f - c * .072f + sn * .928f, 0f, 0f,
+            .213f - c * .213f + sn * .143f, .715f + c * .285f + sn * .140f, .072f - c * .072f - sn * .283f, 0f, 0f,
+            .213f - c * .213f - sn * .787f, .715f - c * .715f + sn * .715f, .072f + c * .928f + sn * .072f, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f))
+    }
+
     fun spawn(id: String) { pending.add(id) }
 
     fun repair() {
@@ -144,7 +181,28 @@ class StageView(ctx: Context) : View(ctx) {
         cracks.clear()
     }
 
+    fun setFinger(on: Boolean) {
+        finger = on
+        tDown = false
+        val lp = layoutParams as? WindowManager.LayoutParams
+        if (lp != null) {
+            lp.flags = if (on) (lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv())
+                       else (lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+            try { wm.updateViewLayout(this, lp) } catch (e: Exception) {}
+        }
+    }
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (!finger) return false
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> { tDown = true; fx = e.rawX; fy = e.rawY }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> tDown = false
+        }
+        return true
+    }
+
     override fun onDetachedFromWindow() {
+        closeMenu()
         for (f in figs) removeHandle(f)
         super.onDetachedFromWindow()
     }
@@ -154,6 +212,8 @@ class StageView(ctx: Context) : View(ctx) {
         figs.removeAll { it.id == id }
         if (figs.size >= 6) { val o = figs.removeAt(0); removeHandle(o) }
         val f = Fig(id, Store.name(context, id), abs(id.hashCode()) % 4, Store.load(context, id))
+        f.hue = fxp.getInt("hue_" + id, 0)
+        f.hm = hueMatrix(f.hue)
         f.x = width * (.15f + rnd() * .7f)
         f.yoff = ground - 40f * dn
         f.face = if (rnd() < .5f) 1f else -1f
@@ -189,9 +249,17 @@ class StageView(ctx: Context) : View(ctx) {
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (f.grab != null) f.grab = null
-                    else if (!moved && e.eventTime - downT < 300 && f.mode == 0) {
-                        say(f, pick(pokeLines[f.mood]), 80)
-                        f.waveT = 60
+                    else if (!moved && e.eventTime - downT < 300) {
+                        if (e.eventTime - f.lastTap < 450) {
+                            f.lastTap = 0L
+                            openMenu(f)
+                        } else {
+                            f.lastTap = e.eventTime
+                            if (f.mode == 0) {
+                                say(f, pick(pokeLines[f.mood]), 80)
+                                f.waveT = 60
+                            }
+                        }
                     }
                 }
             }
@@ -225,6 +293,101 @@ class StageView(ctx: Context) : View(ctx) {
         lp.x = nx; lp.y = ny; lp.width = nw; lp.height = nh
         f.hx = nx; f.hy = ny; f.hw = nw; f.hh = nh
         try { wm.updateViewLayout(v, lp) } catch (e: Exception) {}
+    }
+
+    private fun openMenu(f: Fig) {
+        closeMenu()
+        val c = context
+        f.busy = true
+        val box = LinearLayout(c)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(14), dp(12), dp(14), dp(12))
+        val bgd = GradientDrawable()
+        bgd.setColor(0xF2202733.toInt())
+        bgd.cornerRadius = dp(18).toFloat()
+        box.background = bgd
+        val title = TextView(c)
+        title.text = f.name
+        title.setTextColor(Color.WHITE)
+        title.textSize = 18f
+        title.gravity = Gravity.CENTER
+        box.addView(title)
+        val r1 = LinearLayout(c)
+        r1.gravity = Gravity.CENTER
+        for ((em, k) in listOf("⚡" to "bolt", "🔥" to "fire", "❄️" to "ice", "💥" to "blast")) {
+            val b = TextView(c)
+            b.text = em
+            b.textSize = 26f
+            b.setPadding(dp(12), dp(8), dp(12), dp(8))
+            b.setOnClickListener { closeMenu(); cast(f, k) }
+            r1.addView(b)
+        }
+        box.addView(r1)
+        val lab = TextView(c)
+        lab.text = "اللون (الأبيض = الأصلي)"
+        lab.setTextColor(0xFFAAB4C0.toInt())
+        lab.gravity = Gravity.CENTER
+        box.addView(lab)
+        val r2 = LinearLayout(c)
+        r2.gravity = Gravity.CENTER
+        for (a in intArrayOf(0, 60, 120, 180, 240, 300)) {
+            val v = View(c)
+            val d = GradientDrawable()
+            d.shape = GradientDrawable.OVAL
+            d.setColor(if (a == 0) Color.WHITE else Color.HSVToColor(floatArrayOf(a.toFloat(), .8f, .95f)))
+            d.setStroke(dp(2), 0xFF9AA5B1.toInt())
+            v.background = d
+            val lp = LinearLayout.LayoutParams(dp(38), dp(38))
+            lp.setMargins(dp(4), dp(8), dp(4), dp(8))
+            v.setOnClickListener { f.hue = a; f.hm = hueMatrix(a); fxp.edit().putInt("hue_" + f.id, a).apply() }
+            r2.addView(v, lp)
+        }
+        box.addView(r2)
+        val r3 = LinearLayout(c)
+        r3.gravity = Gravity.CENTER_VERTICAL
+        val ed = EditText(c)
+        ed.setText(f.name)
+        ed.setTextColor(Color.WHITE)
+        ed.setHintTextColor(Color.GRAY)
+        ed.hint = "الاسم"
+        ed.isSingleLine = true
+        r3.addView(ed, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val ok = Button(c)
+        ok.text = "حفظ"
+        ok.setOnClickListener {
+            val n = ed.text.toString().trim()
+            if (n.isNotEmpty()) {
+                f.name = n
+                c.getSharedPreferences("chars", Context.MODE_PRIVATE).edit().putString("name_" + f.id, n).apply()
+            }
+            closeMenu()
+        }
+        r3.addView(ok)
+        box.addView(r3)
+        val cl = TextView(c)
+        cl.text = "إغلاق"
+        cl.setTextColor(0xFFAAB4C0.toInt())
+        cl.gravity = Gravity.CENTER
+        cl.setPadding(0, dp(10), 0, dp(4))
+        cl.setOnClickListener { closeMenu() }
+        box.addView(cl)
+        box.setOnTouchListener { _, e ->
+            if (e.action == MotionEvent.ACTION_OUTSIDE) { closeMenu(); true } else false
+        }
+        val lp = WindowManager.LayoutParams(
+            dp(300), WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT)
+        lp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        lp.y = dp(70)
+        try { wm.addView(box, lp); menu = box } catch (e: Exception) { f.busy = false }
+    }
+
+    private fun closeMenu() {
+        menu?.let { try { wm.removeView(it) } catch (e: Exception) {} }
+        menu = null
+        for (f in figs) f.busy = false
     }
 
     private fun part(x: Float, y: Float, c: Int, n: Int, sp: Float) {
@@ -310,6 +473,7 @@ class StageView(ctx: Context) : View(ctx) {
 
     private fun enterRag(f: Fig) {
         f.mode = 4
+        f.plat = -1f
         for (i in 0..10) { f.pjx[i] = f.jx[i]; f.pjy[i] = f.jy[i] }
         f.rest = 0; f.fvx = 0f; f.fvy = 0f; f.bl = 0f
         f.wantSit = false; f.moving = false; f.walk = 0f; f.vy = 0f
@@ -318,6 +482,7 @@ class StageView(ctx: Context) : View(ctx) {
     private fun exitRag(f: Fig) {
         for (i in 0..10) { f.sx[i] = f.jx[i]; f.sy[i] = f.jy[i] }
         f.bl = 1f
+        f.plat = -1f
         f.x = f.jx[2].coerceIn(width * .05f, width * .95f)
         f.face = if (f.jx[1] >= f.jx[2]) 1f else -1f
         f.yoff = 0f; f.vy = 0f; f.lie = 1f; f.sit = 0f; f.walk = 0f
@@ -406,9 +571,7 @@ class StageView(ctx: Context) : View(ctx) {
         for (i in 0..10) mx = max(mx, abs(f.jx[i] - f.pjx[i]) + abs(f.jy[i] - f.pjy[i]))
         if (!pinned && f.held < 0 && mx < 1.6f * s && f.jy[2] > g - 22f * s) f.rest++ else f.rest = 0
         if (f.rest > 25) exitRag(f)
-    }
-
-    private fun step(f: Fig) {
+    }    private fun step(f: Fig) {
         f.t2 += .06f
         if (f.sayT > 0) f.sayT--
         if (f.castT > 0) f.castT--
@@ -423,6 +586,7 @@ class StageView(ctx: Context) : View(ctx) {
         }
         if (f.grab != null && f.mode != 4) enterRag(f)
         if (f.mode == 4) { ragStep(f); return }
+        val chase = finger && tDown
         if (f.mode == 1) {
             f.vy += .7f * s
             f.yoff -= f.vy
@@ -443,6 +607,25 @@ class StageView(ctx: Context) : View(ctx) {
                     f.waveT = 120
                 } else say(f, pick(recLines[f.mood]), 90)
             }
+        } else if (f.mode == 5) {
+            if (!chase) {
+                enterRag(f)
+            } else {
+                val idx = figs.indexOf(f)
+                val tx = fx + (idx - (figs.size - 1) / 2f) * 10f * s
+                val ty = min(fy - 4f * dn, ground)
+                val dxm = tx - f.x
+                if (abs(dxm) > 2f * s) f.face = if (dxm > 0f) 1f else -1f
+                f.x += dxm * .3f
+                val climbing = abs(f.plat - ty) > 3f * s
+                f.plat += (ty - f.plat) * .12f
+                if (climbing) {
+                    f.walk = lerp(f.walk, 1f, .3f)
+                    f.t += .25f
+                    f.castT = max(f.castT, 3)
+                } else f.walk = lerp(f.walk, 0f, .2f)
+                f.sit = lerp(f.sit, 0f, .2f)
+            }
         } else if (f.yoff > 0f || f.vy != 0f) {
             f.vy += .8f * s
             f.yoff -= f.vy
@@ -452,26 +635,41 @@ class StageView(ctx: Context) : View(ctx) {
             }
         } else {
             val spd = when (f.mood) { 0 -> .6f; 1 -> .45f; 2 -> .9f; else -> .3f }
-            if (f.wantSit) f.sit = min(1f, f.sit + .04f) else f.sit = max(0f, f.sit - .04f)
-            if (!f.moving) {
-                f.timer--
-                if (f.timer <= 0) choose(f)
-            }
-            if (f.moving) {
-                val dx = f.wx - f.x
-                if (abs(dx) < 4f * s || f.sit > .05f) {
-                    f.moving = false; f.timer = 40 + (rnd() * 80).toInt()
-                } else {
-                    f.face = if (dx > 0f) 1f else -1f
-                    f.x += f.face * spd * s
-                    f.walk = lerp(f.walk, 1f, .1f)
-                    f.t += spd * .12f
+            if (f.busy) {
+                f.walk = lerp(f.walk, 0f, .15f)
+                f.moving = false
+            } else {
+                if (chase) {
+                    f.wantSit = false
+                    val idx = figs.indexOf(f)
+                    val tx = fx + (idx - (figs.size - 1) / 2f) * 10f * s
+                    if (abs(f.x - tx) < 8f * s) { f.mode = 5; f.plat = ground; f.moving = false }
+                    else { f.wx = tx; f.moving = true }
                 }
-            } else f.walk = lerp(f.walk, 0f, .1f)
-            f.idleT--
-            if (f.idleT <= 0) {
-                f.idleT = 700 + (rnd() * 900).toInt()
-                if (f.sayT <= 0) say(f, pick(idleLines[f.mood]), 110)
+                if (f.mode == 0) {
+                    if (f.wantSit) f.sit = min(1f, f.sit + .04f) else f.sit = max(0f, f.sit - .04f)
+                    if (!f.moving) {
+                        f.timer--
+                        if (f.timer <= 0) choose(f)
+                    }
+                    if (f.moving) {
+                        val dx = f.wx - f.x
+                        if (abs(dx) < 4f * s || f.sit > .05f) {
+                            f.moving = false; f.timer = 40 + (rnd() * 80).toInt()
+                        } else {
+                            val sp = if (chase) spd * 2.2f else spd
+                            f.face = if (dx > 0f) 1f else -1f
+                            f.x += f.face * sp * s
+                            f.walk = lerp(f.walk, 1f, .1f)
+                            f.t += sp * .12f
+                        }
+                    } else f.walk = lerp(f.walk, 0f, .1f)
+                    f.idleT--
+                    if (f.idleT <= 0) {
+                        f.idleT = 700 + (rnd() * 900).toInt()
+                        if (f.sayT <= 0) say(f, pick(idleLines[f.mood]), 110)
+                    }
+                }
             }
         }
         val w = width.toFloat()
@@ -494,7 +692,7 @@ class StageView(ctx: Context) : View(ctx) {
     }
 
     private fun pose(f: Fig) {
-        val fy = ground - f.yoff
+        val fy = (if (f.plat >= 0f) f.plat else ground) - f.yoff
         val face = f.face
         val pi = Math.PI.toFloat()
         val bob = abs(sin(f.t)) * 2.5f * f.walk
@@ -520,8 +718,8 @@ class StageView(ctx: Context) : View(ctx) {
             val swing = face * sin(ph) * 13f * f.walk * (1f - f.sit)
             val lift = max(0f, cos(ph)) * 9f * f.walk * (1f - f.sit)
             val stand = base + swing + sin(f.t2 * 2f + i * 2f) * 5f * air
-            val fx = hipX + lerp(lerp(stand, sitX, f.sit), lieX, f.lie) * s
-            ik(hipX, hipY, fx, fy - lift * s, 20f * s, 20f * s, -face)
+            val fx2 = hipX + lerp(lerp(stand, sitX, f.sit), lieX, f.lie) * s
+            ik(hipX, hipY, fx2, fy - lift * s, 20f * s, 20f * s, -face)
             val b = 7 + i * 2
             f.jx[b] = tmp[0]; f.jy[b] = tmp[1]; f.jx[b + 1] = tmp[2]; f.jy[b + 1] = tmp[3]
         }
@@ -586,11 +784,13 @@ class StageView(ctx: Context) : View(ctx) {
             cv.drawLines(c, paint)
         }
         for (f in figs) {
-            val sh = if (f.mode == 4) .7f else max(.4f, 1f - f.yoff / (160f * s))
-            fill.color = Color.BLACK
-            fill.alpha = 55
-            cv.drawOval(RectF(f.jx[2] - 18f * s * sh, ground + 1f, f.jx[2] + 18f * s * sh, ground + 6f * s), fill)
-            Puppet.draw(cv, f.bm, f.jx, f.jy, f.face, s)
+            if (f.plat < 0f) {
+                val sh = if (f.mode == 4) .7f else max(.4f, 1f - f.yoff / (160f * s))
+                fill.color = Color.BLACK
+                fill.alpha = 55
+                cv.drawOval(RectF(f.jx[2] - 18f * s * sh, ground + 1f, f.jx[2] + 18f * s * sh, ground + 6f * s), fill)
+            }
+            Puppet.draw(cv, f.bm, f.jx, f.jy, f.face, s, f.hm)
             cv.drawText(f.name, f.jx[0], f.jy[0] - 22f * s, tp)
             if (f.sayT > 0) {
                 val tw = bt.measureText(f.say)
@@ -617,6 +817,16 @@ class StageView(ctx: Context) : View(ctx) {
             for (i in 0 until bolt.size - 1) cv.drawLine(bolt[i].x, bolt[i].y, bolt[i + 1].x, bolt[i + 1].y, paint)
         }
         if (flash > 0) cv.drawColor(Color.argb(flash * 18, 255, 255, 255))
+        if (finger) {
+            paint.color = 0xFF2F7DE1.toInt(); paint.alpha = 160; paint.strokeWidth = 3f * dn
+            cv.drawRect(2f * dn, 2f * dn, width - 2f * dn, height - 2f * dn, paint)
+            if (tDown) {
+                fill.color = Color.WHITE
+                fill.alpha = 90
+                cv.drawCircle(fx, fy, 16f * dn, fill)
+            }
+        }
         postInvalidateOnAnimation()
     }
 }
+// END
