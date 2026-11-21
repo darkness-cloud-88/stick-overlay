@@ -4,15 +4,72 @@ import android.graphics.*
 import android.view.*
 import kotlin.math.*
 
-class Pt(var x: Float, var y: Float) { var px = x; var py = y }
-class Fig(val team: Int, val slot: Int, val name: String, val mood: Int, val p: Array<Pt>, val c: List<FloatArray>) {
-    var hp = 100f; var stun = 30; var frz = 0; var burn = 0
-    var t = 0f; var cd = 30; var atk = 0; var face = 1f; var dead = 0
-    var target: Fig? = null; var tt = 0
-    var grab: PointF? = null
+object Puppet {
+    private val norm = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val dark = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+        colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setScale(.7f, .7f, .7f, 1f) })
+    }
+
+    private fun seg(cv: Canvas, b: Bitmap, i: Int, x1: Float, y1: Float, x2: Float, y2: Float, flip: Boolean, p: Paint) {
+        val len = hypot(x2 - x1, y2 - y1)
+        if (len < 1f) return
+        val k = len / hypot(Store.BX[i] - Store.AX[i], Store.BY[i] - Store.AY[i])
+        cv.save()
+        cv.translate(x1, y1)
+        cv.rotate(Math.toDegrees(atan2((y2 - y1).toDouble(), (x2 - x1).toDouble())).toFloat() - 90f)
+        if (flip) cv.scale(-1f, 1f)
+        cv.scale(k, k)
+        cv.drawBitmap(b, -Store.AX[i], -Store.AY[i], p)
+        cv.restore()
+    }
+
+    fun draw(cv: Canvas, bm: Array<Bitmap>, jx: FloatArray, jy: FloatArray, face: Float, s: Float) {
+        val fl = face < 0f
+        seg(cv, bm[2], 2, jx[1], jy[1], jx[3], jy[3], fl, dark)
+        seg(cv, bm[3], 3, jx[3], jy[3], jx[4], jy[4], fl, dark)
+        seg(cv, bm[4], 4, jx[2], jy[2], jx[7], jy[7], fl, dark)
+        seg(cv, bm[5], 5, jx[7], jy[7], jx[8], jy[8], fl, dark)
+        seg(cv, bm[1], 1, jx[1], jy[1], jx[2], jy[2], fl, norm)
+        val th = Math.toDegrees(atan2((jy[2] - jy[1]).toDouble(), (jx[2] - jx[1]).toDouble())).toFloat() - 90f
+        cv.save()
+        cv.translate(jx[1], jy[1])
+        cv.rotate(th)
+        if (fl) cv.scale(-1f, 1f)
+        cv.scale(.2f * s, .2f * s)
+        cv.drawBitmap(bm[0], -Store.AX[0], -Store.AY[0], norm)
+        cv.restore()
+        seg(cv, bm[4], 4, jx[2], jy[2], jx[9], jy[9], fl, norm)
+        seg(cv, bm[5], 5, jx[9], jy[9], jx[10], jy[10], fl, norm)
+        seg(cv, bm[2], 2, jx[1], jy[1], jx[5], jy[5], fl, norm)
+        seg(cv, bm[3], 3, jx[5], jy[5], jx[6], jy[6], fl, norm)
+    }
+
+    fun standing(jx: FloatArray, jy: FloatArray, cx: Float, cy: Float, u: Float) {
+        jx[2] = cx; jy[2] = cy
+        jx[1] = cx; jy[1] = cy - 30f * u
+        jx[0] = cx; jy[0] = cy - 44f * u
+        jx[3] = cx - 9f * u; jy[3] = jy[1] + 13f * u
+        jx[4] = cx - 12f * u; jy[4] = jy[1] + 27f * u
+        jx[5] = cx + 9f * u; jy[5] = jy[1] + 13f * u
+        jx[6] = cx + 12f * u; jy[6] = jy[1] + 27f * u
+        jx[7] = cx - 6f * u; jy[7] = cy + 20f * u
+        jx[8] = cx - 9f * u; jy[8] = cy + 40f * u
+        jx[9] = cx + 6f * u; jy[9] = cy + 20f * u
+        jx[10] = cx + 9f * u; jy[10] = cy + 40f * u
+    }
+}
+
+class Fig(val id: String, val name: String, val mood: Int, val bm: Array<Bitmap>) {
+    val jx = FloatArray(11); val jy = FloatArray(11)
+    var x = 0f; var yoff = 0f; var vy = 0f
+    var face = 1f; var t = 0f; var t2 = 0f
+    var walk = 0f; var sit = 0f; var lie = 0f; var wave = 0f; var cast = 0f
+    var mode = 1; var modeT = 0
+    var wantSit = false; var wx = 0f; var moving = false
+    var timer = 60; var idleT = 300
     var say = ""; var sayT = 0
-    var wx = 0f; var wt = 0
-    var sit = 0; var idleT = 300
+    var castT = 0; var waveT = 0; var fireT = 0
+    var grab: PointF? = null
     var handle: View? = null
     var hlp: WindowManager.LayoutParams? = null
     var hx = -1; var hy = -1; var hw = -1; var hh = -1
@@ -22,11 +79,8 @@ class Ring(val x: Float, val y: Float, var r: Float, val m: Float, val c: Int)
 
 class StageView(ctx: Context) : View(ctx) {
     private val dn = ctx.resources.displayMetrics.density
-    private val s = dn * 0.9f
+    private val s = dn * 1.05f
     private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-    private val prefs = ctx.getSharedPreferences("stick", Context.MODE_PRIVATE)
-    private val defNames = arrayOf("زيد", "سالم", "ليلى", "كرم", "نور", "هدى")
-    private val slotMood = intArrayOf(0, 1, 2, 3, 0, 2)
     private val pokeLines = arrayOf(
         arrayOf("مرحباً صديقي!", "نعم؟ أنا هنا!"),
         arrayOf("أوه! أهلاً..", "لقد أخفتني قليلاً"),
@@ -37,20 +91,12 @@ class StageView(ctx: Context) : View(ctx) {
         arrayOf("هل أنت هنا؟", "أحب هذا الركن الهادئ", "لا تتركني وحدي.."),
         arrayOf("لنلعب شيئاً!", "شاهد قفزتي!", "هاها! أنا أسرع منك"),
         arrayOf("أشعر بالنعاس..", "هل حان وقت النوم؟", "سأرتاح قليلاً"))
-    private val showLines = arrayOf("شاهد هذا!", "انظر ماذا أفعل!", "أنا أتدرب فقط", "لا تقلق، لن أؤذي أحداً")
-    private val fightLines = arrayOf("أنا مستعد!", "أرجوك لا تؤلمني..", "هيا نلعب بقوة!", "حسناً.. لكن بسرعة")
-    private val hurtLines = arrayOf("هذا لا يؤلم!", "آآه! كفى!", "هاها! أخطأت!", "آه.. أنا نعسان")
-    private val off = arrayOf(
-        floatArrayOf(0f, -44f), floatArrayOf(0f, -30f), floatArrayOf(0f, 0f), floatArrayOf(-12f, -20f),
-        floatArrayOf(-22f, -8f), floatArrayOf(12f, -20f), floatArrayOf(22f, -8f), floatArrayOf(-6f, 20f),
-        floatArrayOf(-8f, 40f), floatArrayOf(6f, 20f), floatArrayOf(8f, 40f))
-    private val lk = arrayOf(
-        intArrayOf(0, 1), intArrayOf(1, 2), intArrayOf(1, 3), intArrayOf(3, 4), intArrayOf(1, 5),
-        intArrayOf(5, 6), intArrayOf(2, 7), intArrayOf(7, 8), intArrayOf(2, 9), intArrayOf(9, 10))
-    private val col = intArrayOf(0xFF2F7DE1.toInt(), 0xFFE5484D.toInt())
+    private val showLines = arrayOf("شاهد هذا!", "انظر ماذا أفعل!", "أنا أتدرب فقط")
     private val figs = ArrayList<Fig>()
+    private val pending = ArrayList<String>()
     private val parts = ArrayList<Part>()
     private val rings = ArrayList<Ring>()
+    private val tmp = FloatArray(4)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND; style = Paint.Style.STROKE }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; textSize = 12f * dn; color = Color.WHITE; setShadowLayer(3f, 0f, 0f, Color.BLACK) }
@@ -61,47 +107,31 @@ class StageView(ctx: Context) : View(ctx) {
     private var bolt: List<PointF> = emptyList()
     private var last = 0L
     private var acc = 0f
-    var fight = false
     private val ground: Float get() = height - 56f * dn
 
     private fun rnd() = Math.random().toFloat()
+    private fun dp(v: Int) = (v * dn).toInt()
+    private fun lerp(a: Float, b: Float, k: Float) = a + (b - a) * k
     private fun say(f: Fig, t: String, n: Int) { f.say = t; f.sayT = n }
+    private fun pick(a: Array<String>) = a[(rnd() * a.size).toInt().coerceIn(0, a.size - 1)]
 
-    fun toggleFight(): Boolean {
-        fight = !fight
-        for (f in figs) if (f.hp > 0) {
-            f.sit = 0; f.target = null; f.atk = 0
-            if (fight) say(f, fightLines[f.mood], 70)
-            else { f.hp = 100f; f.burn = 0; f.frz = 0; say(f, "عدنا أصدقاء!", 60) }
-        }
-        return fight
-    }
-
-    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
-        super.onSizeChanged(w, h, ow, oh)
-        if (figs.isEmpty() && w > 0) { addFig(0); addFig(1) }
-    }
+    fun spawn(id: String) { pending.add(id) }
 
     override fun onDetachedFromWindow() {
         for (f in figs) removeHandle(f)
         super.onDetachedFromWindow()
     }
 
-    fun addNext() {
-        val used = figs.filter { it.hp > 0 }.map { it.slot }
-        val slot = (0..5).firstOrNull { it !in used } ?: return
-        addFig(slot)
-    }
-
-    private fun addFig(slot: Int) {
-        val x = width * (0.15f + rnd() * 0.7f)
-        val y0 = ground - 130f * s
-        val p = Array(11) { Pt(x + off[it][0] * s, y0 + off[it][1] * s) }
-        val c = lk.map { l -> floatArrayOf(l[0].toFloat(), l[1].toFloat(), hypot(p[l[0]].x - p[l[1]].x, p[l[0]].y - p[l[1]].y)) }
-        var name = prefs.getString("n$slot", defNames[slot]) ?: defNames[slot]
-        if (name.isBlank()) name = defNames[slot]
-        val f = Fig(slot % 2, slot, name, slotMood[slot], p, c)
+    private fun addFig(id: String) {
+        for (o in figs.filter { it.id == id }) removeHandle(o)
+        figs.removeAll { it.id == id }
+        if (figs.size >= 6) { val o = figs.removeAt(0); removeHandle(o) }
+        val f = Fig(id, Store.name(context, id), abs(id.hashCode()) % 4, Store.load(context, id))
+        f.x = width * (.15f + rnd() * .7f)
+        f.yoff = ground - 40f * dn
+        f.face = if (rnd() < .5f) 1f else -1f
         figs.add(f)
+        pose(f)
         makeHandle(f)
     }
 
@@ -123,18 +153,16 @@ class StageView(ctx: Context) : View(ctx) {
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     f.grab = null
-                    if (!moved && e.eventTime - downT < 300 && f.hp > 0) {
-                        val arr = pokeLines[f.mood]
-                        say(f, arr[(rnd() * arr.size).toInt().coerceIn(0, arr.size - 1)], 80)
-                        f.sit = 0
-                        if (f.mood == 2) for (q in f.p) q.py += 7f * s
+                    if (!moved && e.eventTime - downT < 300 && f.mode == 0) {
+                        say(f, pick(pokeLines[f.mood]), 80)
+                        f.waveT = 60
                     }
                 }
             }
             true
         }
         val lp = WindowManager.LayoutParams(
-            (50f * dn).toInt(), (100f * dn).toInt(), WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            dp(50), dp(100), WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT)
@@ -150,8 +178,8 @@ class StageView(ctx: Context) : View(ctx) {
     private fun syncHandle(f: Fig) {
         val v = f.handle ?: return
         val lp = f.hlp ?: return
-        var minX = 1e9f; var minY = 1e9f; var maxX = -1e9f; var maxY = -1e9f
-        for (q in f.p) { minX = min(minX, q.x); minY = min(minY, q.y); maxX = max(maxX, q.x); maxY = max(maxY, q.y) }
+        var minX = 1e9f; var minY = f.jy[1] - 26f * s; var maxX = -1e9f; var maxY = -1e9f
+        for (i in 1..10) { minX = min(minX, f.jx[i]); minY = min(minY, f.jy[i]); maxX = max(maxX, f.jx[i]); maxY = max(maxY, f.jy[i]) }
         val pad = 16f * dn
         val nx = (minX - pad).toInt()
         val ny = (minY - pad).toInt()
@@ -167,222 +195,190 @@ class StageView(ctx: Context) : View(ctx) {
         repeat(n) { parts.add(Part(x, y, (rnd() - .5f) * sp * s, (rnd() - .8f) * sp * s, 20 + (rnd() * 20).toInt(), c, (1 + rnd() * 2) * s)) }
     }
 
-    private fun hit(f: Fig, d: Float, vx: Float, vy: Float, st: Int) {
-        f.hp -= d
-        f.sit = 0
-        f.stun = max(f.stun, st)
-        for (q in f.p) { q.px -= vx; q.py -= vy }
-        if (f.hp > 0 && f.sayT <= 0 && rnd() < .3f) say(f, hurtLines[f.mood], 50)
-    }
-
-    fun power(kind: String) {
-        val alive = figs.filter { it.hp > 0 }
-        if (alive.isEmpty()) return
-        val user = alive.random()
-        if (!fight) {
-            val x = (user.p[2].x + user.face * 110f * s).coerceIn(30f, max(30f, width - 30f))
-            val y = ground - 30f * s
-            say(user, showLines[(rnd() * showLines.size).toInt().coerceIn(0, showLines.size - 1)], 70)
-            when (kind) {
-                "bolt" -> {
-                    val pts = ArrayList<PointF>()
-                    for (i in 0..8) pts.add(PointF(if (i == 8) x else x + (rnd() - .5f) * 40f * s, y * i / 8f))
-                    bolt = pts; boltL = 9; flash = 3
-                    part(x, y, 0xFFFFF27A.toInt(), 12, 6f)
-                }
-                "fire" -> part(x, y, 0xFFFF8A1F.toInt(), 22, 6f)
-                "ice" -> { rings.add(Ring(x, y, 10f * s, 90f * s, 0xFF7FD4FF.toInt())); part(x, y, 0xFFBFEAFF.toInt(), 14, 5f) }
-                "blast" -> { rings.add(Ring(x, y, 10f * s, 120f * s, 0xFFFF9A3C.toInt())); part(x, y, 0xFFFFB347.toInt(), 18, 8f) }
-            }
-            return
-        }
-        val tg = user.target?.takeIf { it.hp > 0 } ?: alive.firstOrNull { it.team != user.team } ?: return
-        val x = tg.p[2].x
-        val y = tg.p[2].y
-        say(user, "خذ هذا!", 50)
+    private fun cast(f: Fig, kind: String) {
+        if (f.mode != 0) return
+        f.castT = 60
+        f.wantSit = false
+        say(f, pick(showLines), 70)
+        val x = (f.x + f.face * 100f * s).coerceIn(30f, max(30f, width - 30f))
+        val y = ground - 20f * s
         when (kind) {
             "bolt" -> {
                 val pts = ArrayList<PointF>()
                 for (i in 0..8) pts.add(PointF(if (i == 8) x else x + (rnd() - .5f) * 40f * s, y * i / 8f))
-                bolt = pts; boltL = 9; flash = 6
-                hit(tg, 35f, (rnd() - .5f) * 4f * s, -9f * s, 70)
-                part(x, y, 0xFFFFF27A.toInt(), 18, 8f)
+                bolt = pts; boltL = 9; flash = 3
+                part(x, y, 0xFFFFF27A.toInt(), 12, 6f)
             }
-            "fire" -> tg.burn = 240
-            "ice" -> {
-                tg.frz = 200
-                rings.add(Ring(x, y, 10f * s, 90f * s, 0xFF7FD4FF.toInt()))
-                part(x, y, 0xFFBFEAFF.toInt(), 14, 5f)
-            }
-            "blast" -> {
-                rings.add(Ring(x, y, 10f * s, 140f * s, 0xFFFF9A3C.toInt()))
-                for (f in figs) {
-                    var hurt = false
-                    for (q in f.p) {
-                        val dx = q.x - x
-                        val dy = q.y - y
-                        val d = hypot(dx, dy)
-                        if (d < 140f * s) {
-                            val k = (1f - d / (140f * s)) * 16f * s
-                            val dd = max(d, 1f)
-                            q.px -= dx / dd * k
-                            q.py -= dy / dd * k - 1f
-                            hurt = true
-                        }
-                    }
-                    if (hurt) { f.hp -= 14f; f.stun = max(f.stun, 60) }
-                }
-                part(x, y, 0xFFFFB347.toInt(), 24, 10f)
-            }
+            "fire" -> f.fireT = 90
+            "ice" -> { rings.add(Ring(x, y, 10f * s, 90f * s, 0xFF7FD4FF.toInt())); part(x, y, 0xFFBFEAFF.toInt(), 14, 5f) }
+            "blast" -> { rings.add(Ring(x, y, 10f * s, 120f * s, 0xFFFF9A3C.toInt())); part(x, y, 0xFFFFB347.toInt(), 18, 8f) }
+        }
+    }
+
+    fun power(kind: String) {
+        if (figs.isEmpty()) return
+        cast(figs[(rnd() * figs.size).toInt().coerceIn(0, figs.size - 1)], kind)
+    }
+
+    private fun choose(f: Fig) {
+        if (f.sit > .05f || f.wantSit) {
+            if (rnd() < .5f) { f.wantSit = true; f.timer = 150 + (rnd() * 250).toInt() }
+            else { f.wantSit = false; f.timer = 35 }
+            return
+        }
+        val pSit = when (f.mood) { 3 -> .4f; 1 -> .2f; 0 -> .15f; else -> .1f }
+        val pWalk = when (f.mood) { 0 -> .5f; 1 -> .35f; 2 -> .55f; else -> .2f }
+        val r = rnd()
+        when {
+            r < pSit -> { f.wantSit = true; f.timer = 200 + (rnd() * 300).toInt() }
+            r < pSit + pWalk -> { f.wx = width * (.1f + rnd() * .8f); f.moving = true }
+            r < pSit + pWalk + .1f -> { f.waveT = 100; f.timer = 140 }
+            f.mood == 2 && r < pSit + pWalk + .2f -> { f.vy = -9f * s; f.timer = 90 }
+            else -> f.timer = 80 + (rnd() * 120).toInt()
         }
     }
 
     private fun step(f: Fig) {
-        val p = f.p
-        for (q in p) {
-            val vx = (q.x - q.px) * .985f
-            val vy = (q.y - q.py) * .985f
-            q.px = q.x; q.py = q.y
-            q.x += vx; q.y += vy + .7f * s
-        }
-        if (f.stun > 0) f.stun--
-        if (f.cd > 0) f.cd--
+        f.t2 += .06f
         if (f.sayT > 0) f.sayT--
-        if (f.idleT > 0) f.idleT--
-        val gr = f.grab
-        if (gr != null && f.hp > 0) {
-            val nk = p[1]
-            nk.x += (gr.x - nk.x) * .5f
-            nk.y += (gr.y - nk.y) * .5f
-            f.stun = max(f.stun, 8)
-            f.sit = 0
+        if (f.castT > 0) f.castT--
+        if (f.waveT > 0) f.waveT--
+        f.cast = lerp(f.cast, if (f.castT > 0) 1f else 0f, .15f)
+        f.wave = lerp(f.wave, if (f.waveT > 0) 1f else 0f, .12f)
+        if (f.fireT > 0) {
+            f.fireT--
+            part(f.jx[6], f.jy[6], if (rnd() < .5f) 0xFFFF7A1A.toInt() else 0xFFFFD23F.toInt(), 2, 3f)
         }
-        val frozen = f.frz > 0
-        if (frozen) { f.frz--; for (q in p) { q.px = q.x; q.py = q.y } }
-        if (f.burn > 0) {
-            f.burn--; f.hp -= .25f
-            if (f.burn % 4 == 0) { val q = p[(rnd() * 11).toInt().coerceIn(0, 10)]; part(q.x, q.y, 0xFFFF8A1F.toInt(), 1, 2f) }
-        }
-        val g = ground
-        val w = width.toFloat()
-        if (f.hp > 0 && f.stun <= 0 && !frozen) {
-            val hip = p[2]; val hd = p[0]; val nk = p[1]
-            val sit = f.sit > 0 && f.target == null
-            val hh = if (sit) 24f else 40f
-            if (hip.y > g - 75f * s) hip.y += ((g - hh * s) - hip.y) * .2f
-            nk.x += (hip.x - nk.x) * .25f; nk.y += ((hip.y - 30f * s) - nk.y) * .25f
-            hd.x += (hip.x - hd.x) * .25f; hd.y += ((hip.y - 44f * s) - hd.y) * .25f
-            if (fight) {
-                f.tt--
-                if (f.tt <= 0) {
-                    f.tt = 15
-                    var b: Fig? = null
-                    var bd = 1e9f
-                    for (o in figs) if (o.team != f.team && o.hp > 0) {
-                        val d = abs(o.p[2].x - hip.x)
-                        if (d < bd) { bd = d; b = o }
-                    }
-                    f.target = b
-                }
-            } else f.target = null
-            val spd = when (f.mood) { 0 -> 1.6f; 1 -> 1.3f; 2 -> 2.0f; else -> .9f }
-            val cdMax = when (f.mood) { 0 -> 40; 1 -> 70; 2 -> 45; else -> 80 }
-            val dmg = when (f.mood) { 0 -> 11f; 1 -> 6f; 2 -> 8f; else -> 9f }
-            var dir = 0f
-            val tg = f.target
-            if (tg != null && tg.hp > 0) {
-                val dx = tg.p[2].x - hip.x
-                f.face = if (dx >= 0f) 1f else -1f
-                val flee = f.mood == 1 && f.hp < 60f
-                if (flee) dir = -f.face else if (abs(dx) > 40f * s) dir = f.face
-                if (dir != 0f) hip.x += dir * spd * s
-                if (!flee && abs(dx) < 52f * s && abs(tg.p[2].y - hip.y) < 60f * s && f.cd <= 0 && f.atk <= 0) { f.atk = 14; f.cd = cdMax }
-            } else {
-                f.wt--
-                if (f.wt <= 0) {
-                    if (rnd() < .3f) { f.sit = 150 + (rnd() * 250).toInt(); f.wt = f.sit + 40 }
-                    else { f.wx = w * (.12f + rnd() * .76f); f.wt = 120 + (rnd() * 200).toInt() }
-                }
-                if (f.sit > 0) f.sit--
-                else {
-                    val dx = f.wx - hip.x
-                    if (abs(dx) > 20f * s) { dir = if (dx > 0f) 1f else -1f; f.face = dir; hip.x += dir * spd * .5f * s }
-                }
+        val g = f.grab
+        if (g != null) {
+            f.mode = 0
+            f.x += (g.x - f.x) * .5f
+            val target = max(0f, ground - (g.y + 68f * s))
+            f.yoff += (target - f.yoff) * .5f
+            f.vy = 0f
+            f.walk = lerp(f.walk, 0f, .2f); f.sit = lerp(f.sit, 0f, .2f); f.lie = lerp(f.lie, 0f, .2f)
+            f.wantSit = false; f.moving = false; f.timer = 60
+        } else if (f.mode == 1) {
+            f.vy += .7f * s
+            f.yoff -= f.vy
+            if (f.yoff <= 0f) {
+                f.yoff = 0f; f.vy = 0f; f.mode = 2; f.modeT = 70; f.lie = 1f
+                part(f.x, ground, 0xFFB8B0A0.toInt(), 10, 4f)
             }
-            if (hip.x < w * .08f) hip.x += .8f * s
-            if (hip.x > w * .92f) hip.x -= .8f * s
-            if (!fight && f.idleT <= 0) {
-                f.idleT = 600 + (rnd() * 900).toInt()
-                if (f.sayT <= 0 && f.grab == null) {
-                    val arr = idleLines[f.mood]
-                    say(f, arr[(rnd() * arr.size).toInt().coerceIn(0, arr.size - 1)], 110)
-                }
+        } else if (f.mode == 2) {
+            f.modeT--
+            if (f.modeT <= 0) f.mode = 3
+        } else if (f.mode == 3) {
+            f.lie = max(0f, f.lie - .012f)
+            if (f.lie <= .01f) {
+                f.lie = 0f; f.mode = 0; f.timer = 100
+                say(f, "أهلاً، أنا " + f.name, 150)
+                f.waveT = 120
             }
-            if (f.mood == 2 && !sit && rnd() < .004f && hip.y > g - 50f * s) { for (q in p) q.py += 11f * s }
-            if (dir != 0f) f.t += .22f
-            for (sd in 0..1) {
-                val ph = f.t + sd * Math.PI.toFloat()
-                val lift = if (dir != 0f) max(0f, sin(ph)) * 12f * s else 0f
-                val ft = p[if (sd == 1) 10 else 8]
-                val kn = p[if (sd == 1) 9 else 7]
-                val tx = if (sit) hip.x + f.face * (if (sd == 1) 26f else 20f) * s
-                         else hip.x + (if (sd == 1) 9f else -9f) * s + (if (dir != 0f) cos(ph) * 10f * s * dir else 0f)
-                ft.x += (tx - ft.x) * .3f; ft.y += ((g - lift) - ft.y) * .4f
-                if (sit) {
-                    kn.x += (((hip.x + ft.x) / 2f) - kn.x) * .25f
-                    kn.y += (((hip.y + ft.y) / 2f - 8f * s) - kn.y) * .25f
+        } else if (f.yoff > 0f || f.vy != 0f) {
+            f.vy += .8f * s
+            f.yoff -= f.vy
+            if (f.yoff <= 0f) { f.yoff = 0f; f.vy = 0f; f.timer = 40 }
+        } else {
+            val spd = when (f.mood) { 0 -> .6f; 1 -> .45f; 2 -> .9f; else -> .3f }
+            if (f.wantSit) f.sit = min(1f, f.sit + .04f) else f.sit = max(0f, f.sit - .04f)
+            if (!f.moving) {
+                f.timer--
+                if (f.timer <= 0) choose(f)
+            }
+            if (f.moving) {
+                val dx = f.wx - f.x
+                if (abs(dx) < 4f * s || f.sit > .05f) {
+                    f.moving = false; f.timer = 40 + (rnd() * 80).toInt()
                 } else {
-                    kn.x += (((hip.x + ft.x) / 2f + dir * 5f * s) - kn.x) * .25f
-                    kn.y += (((hip.y + ft.y) / 2f) - kn.y) * .25f
+                    f.face = if (dx > 0f) 1f else -1f
+                    f.x += f.face * spd * s
+                    f.walk = lerp(f.walk, 1f, .1f)
+                    f.t += spd * .12f
                 }
-            }
-            val sh = p[1]
-            for (sd in 0..1) {
-                val el = p[if (sd == 1) 5 else 3]
-                val ha = p[if (sd == 1) 6 else 4]
-                var ex = sh.x + (if (sd == 1) 10f else -10f) * s
-                var ey = sh.y + 12f * s
-                var hx = sh.x + (if (sd == 1) 15f else -15f) * s
-                var hy = sh.y + 26f * s
-                var k = .25f
-                if (f.atk > 0 && sd == 1 && tg != null) {
-                    hx = tg.p[1].x - f.face * 10f * s; hy = tg.p[1].y
-                    ex = (sh.x + hx) / 2f; ey = (sh.y + hy) / 2f; k = .6f
-                }
-                el.x += (ex - el.x) * .3f; el.y += (ey - el.y) * .3f
-                ha.x += (hx - ha.x) * k; ha.y += (hy - ha.y) * k
-            }
-            if (f.atk > 0) {
-                f.atk--
-                if (f.atk == 7 && tg != null && tg.hp > 0 && abs(tg.p[2].x - hip.x) < 64f * s) {
-                    hit(tg, dmg, f.face * 3.5f * s, -3f * s, 14)
-                    for (q in p) q.px += f.face * 1.2f * s
-                    part(tg.p[1].x, tg.p[1].y, 0xFFFFCF33.toInt(), 6, 5f)
-                }
+            } else f.walk = lerp(f.walk, 0f, .1f)
+            f.idleT--
+            if (f.idleT <= 0) {
+                f.idleT = 700 + (rnd() * 900).toInt()
+                if (f.sayT <= 0) say(f, pick(idleLines[f.mood]), 110)
             }
         }
-        repeat(6) {
-            for (c in f.c) {
-                val a = p[c[0].toInt()]; val b = p[c[1].toInt()]
-                val dx = b.x - a.x; val dy = b.y - a.y
-                val d = max(hypot(dx, dy), .001f)
-                val df = (d - c[2]) / d * .5f
-                a.x += dx * df; a.y += dy * df; b.x -= dx * df; b.y -= dy * df
+        val w = width.toFloat()
+        f.x = f.x.coerceIn(w * .05f, w * .95f)
+    }
+
+    private fun ik(hx: Float, hy: Float, fx: Float, fy: Float, l1: Float, l2: Float, bend: Float) {
+        val dx = fx - hx
+        val dy = fy - hy
+        val d0 = max(hypot(dx, dy), .001f)
+        val ux = dx / d0
+        val uy = dy / d0
+        val d = min(d0, l1 + l2 - .01f)
+        val a = (l1 * l1 - l2 * l2 + d * d) / (2f * d)
+        val h = sqrt(max(l1 * l1 - a * a, 0f))
+        tmp[0] = hx + ux * a - uy * h * bend
+        tmp[1] = hy + uy * a + ux * h * bend
+        tmp[2] = hx + ux * d
+        tmp[3] = hy + uy * d
+    }
+
+    private fun pose(f: Fig) {
+        val fy = ground - f.yoff
+        val face = f.face
+        val pi = Math.PI.toFloat()
+        val bob = abs(sin(f.t)) * 2.5f * f.walk
+        val low = max(f.sit, f.lie)
+        val hipX = f.x
+        val hipY = fy - (lerp(38f, 5f, low) - bob) * s
+        val ang = f.lie * 1.45f + f.sit * .1f
+        val neckX = hipX + face * sin(ang) * 30f * s
+        val neckY = hipY - cos(ang) * 30f * s + sin(f.t2) * .8f * s
+        f.jx[2] = hipX; f.jy[2] = hipY
+        f.jx[1] = neckX; f.jy[1] = neckY
+        f.jx[0] = neckX; f.jy[0] = neckY - 14f * s
+        val air = if (f.yoff > 3f * s) 1f else 0f
+        for (i in 0..1) {
+            val ph = f.t + i * pi
+            val base = if (i == 0) -6f else 6f
+            val sitX = face * (24f + i * 7f)
+            val lieX = -face * (26f + i * 9f)
+            val swing = face * sin(ph) * 13f * f.walk * (1f - f.sit)
+            val lift = max(0f, cos(ph)) * 9f * f.walk * (1f - f.sit)
+            val stand = base + swing + sin(f.t2 * 2f + i * 2f) * 5f * air
+            val fx = hipX + lerp(lerp(stand, sitX, f.sit), lieX, f.lie) * s
+            ik(hipX, hipY, fx, fy - lift * s, 20f * s, 20f * s, -face)
+            val b = 7 + i * 2
+            f.jx[b] = tmp[0]; f.jy[b] = tmp[1]; f.jx[b + 1] = tmp[2]; f.jy[b + 1] = tmp[3]
+        }
+        val nl = 1f - f.lie
+        for (i in 0..1) {
+            val side = if (i == 0) -1f else 1f
+            val pa = f.t + (1 - i) * pi
+            var hx = neckX + side * 8f * s + face * sin(pa) * 11f * s * f.walk * (1f - f.sit)
+            var hy = neckY + 26f * s
+            hx = lerp(hx, hipX + face * (12f + i * 6f) * s, f.sit)
+            hy = lerp(hy, fy - 20f * s, f.sit)
+            hx = lerp(hx, neckX + face * (6f + i * 8f) * s, f.lie)
+            hy = lerp(hy, fy - (4f + i * 3f) * s, f.lie)
+            if (i == 1) {
+                hx = lerp(hx, neckX + face * 14f * s + sin(f.t2 * 4f) * 7f * s, f.wave * nl)
+                hy = lerp(hy, neckY - 22f * s, f.wave * nl)
             }
-            for (q in p) {
-                if (q.y > g) { q.y = g; q.px += (q.x - q.px) * .4f }
-                if (q.x < 8f) { q.x = 8f; q.px = q.x }
-                if (q.x > w - 8f) { q.x = w - 8f; q.px = q.x }
-            }
+            hx = lerp(hx, neckX + side * 12f * s, f.cast * nl)
+            hy = lerp(hy, neckY - 28f * s, f.cast * nl)
+            ik(neckX, neckY, hx, hy, 15f * s, 15f * s, face)
+            val b = 3 + i * 2
+            f.jx[b] = tmp[0]; f.jy[b] = tmp[1]; f.jx[b + 1] = tmp[2]; f.jy[b + 1] = tmp[3]
         }
     }
 
     private fun tick() {
-        for (f in figs) {
-            if (f.hp <= 0) { f.dead++; if (f.handle != null) removeHandle(f) }
-            step(f)
+        if (pending.isNotEmpty() && width > 0) {
+            val l = ArrayList<String>(pending)
+            pending.clear()
+            for (id in l) addFig(id)
         }
-        figs.removeAll { it.dead > 260 }
+        for (f in figs) { step(f); pose(f) }
         for (q in parts) { q.x += q.vx; q.y += q.vy; q.vy += .15f * s; q.l-- }
         parts.removeAll { it.l <= 0 }
         for (r in rings) r.r += 7f * s
@@ -399,32 +395,19 @@ class StageView(ctx: Context) : View(ctx) {
         while (acc >= 1f) { tick(); acc -= 1f }
         for (f in figs) syncHandle(f)
         for (f in figs) {
-            val p = f.p
-            val a = if (f.dead > 200) max(0f, 1f - (f.dead - 200) / 60f) else 1f
-            paint.color = when {
-                f.frz > 0 -> 0xFF7FD4FF.toInt()
-                f.burn > 0 -> 0xFFFF8A1F.toInt()
-                else -> col[f.team]
-            }
-            paint.alpha = (a * 255).toInt()
-            paint.strokeWidth = 6f * s
-            for (l in lk) cv.drawLine(p[l[0]].x, p[l[0]].y, p[l[1]].x, p[l[1]].y, paint)
-            cv.drawCircle(p[0].x, p[0].y, 10f * s, paint)
-            if (f.hp > 0) {
-                if (fight) {
-                    fill.color = col[f.team]
-                    val x0 = p[0].x - 17f * s
-                    cv.drawRect(x0, p[0].y - 26f * s, x0 + 34f * s * f.hp.coerceIn(0f, 100f) / 100f, p[0].y - 22f * s, fill)
-                }
-                cv.drawText(f.name, p[0].x, p[0].y - 31f * s, tp)
-                if (f.sayT > 0) {
-                    val tw = bt.measureText(f.say)
-                    val half = tw / 2f + 14f * dn
-                    val bx = p[0].x.coerceIn(half, max(half, width - half))
-                    val by = p[0].y - 56f * s
-                    cv.drawRoundRect(RectF(bx - half, by - 18f * dn, bx + half, by + 8f * dn), 14f * dn, 14f * dn, bg)
-                    cv.drawText(f.say, bx, by, bt)
-                }
+            val sh = max(.4f, 1f - f.yoff / (160f * s))
+            fill.color = Color.BLACK
+            fill.alpha = 55
+            cv.drawOval(RectF(f.x - 18f * s * sh, ground + 1f, f.x + 18f * s * sh, ground + 6f * s), fill)
+            Puppet.draw(cv, f.bm, f.jx, f.jy, f.face, s)
+            cv.drawText(f.name, f.jx[1], f.jy[1] - 28f * s, tp)
+            if (f.sayT > 0) {
+                val tw = bt.measureText(f.say)
+                val half = tw / 2f + 14f * dn
+                val bx = f.jx[1].coerceIn(half, max(half, width - half))
+                val by = f.jy[1] - 52f * s
+                cv.drawRoundRect(RectF(bx - half, by - 18f * dn, bx + half, by + 8f * dn), 14f * dn, 14f * dn, bg)
+                cv.drawText(f.say, bx, by, bt)
             }
         }
         for (r in rings) {
