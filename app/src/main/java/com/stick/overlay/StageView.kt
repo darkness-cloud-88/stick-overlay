@@ -30,7 +30,7 @@ object Puppet {
         seg(cv, bm[4], 4, jx[2], jy[2], jx[7], jy[7], fl, dark)
         seg(cv, bm[5], 5, jx[7], jy[7], jx[8], jy[8], fl, dark)
         seg(cv, bm[1], 1, jx[1], jy[1], jx[2], jy[2], fl, norm)
-        val th = Math.toDegrees(atan2((jy[2] - jy[1]).toDouble(), (jx[2] - jx[1]).toDouble())).toFloat() - 90f
+        val th = Math.toDegrees(atan2((jy[0] - jy[1]).toDouble(), (jx[0] - jx[1]).toDouble())).toFloat() + 90f
         cv.save()
         cv.translate(jx[1], jy[1])
         cv.rotate(th)
@@ -61,6 +61,8 @@ object Puppet {
 
 class Fig(val id: String, val name: String, val mood: Int, val bm: Array<Bitmap>) {
     val jx = FloatArray(11); val jy = FloatArray(11)
+    val pjx = FloatArray(11); val pjy = FloatArray(11)
+    val sx = FloatArray(11); val sy = FloatArray(11)
     var x = 0f; var yoff = 0f; var vy = 0f
     var face = 1f; var t = 0f; var t2 = 0f
     var walk = 0f; var sit = 0f; var lie = 0f; var wave = 0f; var cast = 0f
@@ -70,6 +72,10 @@ class Fig(val id: String, val name: String, val mood: Int, val bm: Array<Bitmap>
     var say = ""; var sayT = 0
     var castT = 0; var waveT = 0; var fireT = 0
     var grab: PointF? = null
+    var held = -1; var rest = 0
+    var fvx = 0f; var fvy = 0f
+    var bl = 0f; var fxCd = 0; var crackCd = 0
+    var greet = true
     var handle: View? = null
     var hlp: WindowManager.LayoutParams? = null
     var hx = -1; var hy = -1; var hw = -1; var hh = -1
@@ -91,11 +97,27 @@ class StageView(ctx: Context) : View(ctx) {
         arrayOf("هل أنت هنا؟", "أحب هذا الركن الهادئ", "لا تتركني وحدي.."),
         arrayOf("لنلعب شيئاً!", "شاهد قفزتي!", "هاها! أنا أسرع منك"),
         arrayOf("أشعر بالنعاس..", "هل حان وقت النوم؟", "سأرتاح قليلاً"))
+    private val hurtLines = arrayOf(
+        arrayOf("هذا لا يؤلم!", "أنا قوي!"),
+        arrayOf("آآه! كفى!", "أوووه.."),
+        arrayOf("هاها! مرة ثانية!", "واااو!"),
+        arrayOf("آه.. ظهري", "أريد أن أنام.."))
+    private val recLines = arrayOf(
+        arrayOf("أنا بخير!", "هيا مجدداً!"),
+        arrayOf("هل انتهينا؟", "رأسي يدور.."),
+        arrayOf("ممتع! مرة ثانية!", "هاها!"),
+        arrayOf("آه.. أحتاج راحة", "كان ذلك كافياً"))
     private val showLines = arrayOf("شاهد هذا!", "انظر ماذا أفعل!", "أنا أتدرب فقط")
+    private val rc = arrayOf(
+        floatArrayOf(0f, 1f, 14f, 1f), floatArrayOf(1f, 2f, 30f, 1f), floatArrayOf(1f, 3f, 15f, 1f),
+        floatArrayOf(3f, 4f, 15f, 1f), floatArrayOf(1f, 5f, 15f, 1f), floatArrayOf(5f, 6f, 15f, 1f),
+        floatArrayOf(2f, 7f, 20f, 1f), floatArrayOf(7f, 8f, 20f, 1f), floatArrayOf(2f, 9f, 20f, 1f),
+        floatArrayOf(9f, 10f, 20f, 1f), floatArrayOf(0f, 2f, 44f, .25f))
     private val figs = ArrayList<Fig>()
     private val pending = ArrayList<String>()
     private val parts = ArrayList<Part>()
     private val rings = ArrayList<Ring>()
+    private val cracks = ArrayList<FloatArray>()
     private val tmp = FloatArray(4)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND; style = Paint.Style.STROKE }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -116,6 +138,11 @@ class StageView(ctx: Context) : View(ctx) {
     private fun pick(a: Array<String>) = a[(rnd() * a.size).toInt().coerceIn(0, a.size - 1)]
 
     fun spawn(id: String) { pending.add(id) }
+
+    fun repair() {
+        for (c in cracks) part(c[0], c[1], 0xFFFFE08A.toInt(), 6, 4f)
+        cracks.clear()
+    }
 
     override fun onDetachedFromWindow() {
         for (f in figs) removeHandle(f)
@@ -145,15 +172,24 @@ class StageView(ctx: Context) : View(ctx) {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downT = e.eventTime; sx = e.rawX; sy = e.rawY; moved = false
-                    f.grab = PointF(e.rawX, e.rawY)
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    if (hypot(e.rawX - sx, e.rawY - sy) > 12f * dn) moved = true
+                    if (!moved && hypot(e.rawX - sx, e.rawY - sy) > 12f * dn) {
+                        moved = true
+                        var bi = 1
+                        var bd = 1e9f
+                        for (i in 0..10) {
+                            val d = hypot(f.jx[i] - sx, f.jy[i] - sy)
+                            if (d < bd) { bd = d; bi = i }
+                        }
+                        f.held = bi
+                        f.grab = PointF(e.rawX, e.rawY)
+                    }
                     f.grab?.set(e.rawX, e.rawY)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    f.grab = null
-                    if (!moved && e.eventTime - downT < 300 && f.mode == 0) {
+                    if (f.grab != null) f.grab = null
+                    else if (!moved && e.eventTime - downT < 300 && f.mode == 0) {
                         say(f, pick(pokeLines[f.mood]), 80)
                         f.waveT = 60
                     }
@@ -178,9 +214,9 @@ class StageView(ctx: Context) : View(ctx) {
     private fun syncHandle(f: Fig) {
         val v = f.handle ?: return
         val lp = f.hlp ?: return
-        var minX = 1e9f; var minY = f.jy[1] - 26f * s; var maxX = -1e9f; var maxY = -1e9f
-        for (i in 1..10) { minX = min(minX, f.jx[i]); minY = min(minY, f.jy[i]); maxX = max(maxX, f.jx[i]); maxY = max(maxY, f.jy[i]) }
-        val pad = 16f * dn
+        var minX = 1e9f; var minY = 1e9f; var maxX = -1e9f; var maxY = -1e9f
+        for (i in 0..10) { minX = min(minX, f.jx[i]); minY = min(minY, f.jy[i]); maxX = max(maxX, f.jx[i]); maxY = max(maxY, f.jy[i]) }
+        val pad = 22f * dn
         val nx = (minX - pad).toInt()
         val ny = (minY - pad).toInt()
         val nw = max(maxX - minX + 2f * pad, 50f * dn).toInt()
@@ -193,6 +229,40 @@ class StageView(ctx: Context) : View(ctx) {
 
     private fun part(x: Float, y: Float, c: Int, n: Int, sp: Float) {
         repeat(n) { parts.add(Part(x, y, (rnd() - .5f) * sp * s, (rnd() - .8f) * sp * s, 20 + (rnd() * 20).toInt(), c, (1 + rnd() * 2) * s)) }
+    }
+
+    private fun addCrack(x: Float, y: Float, power: Float) {
+        val seg = ArrayList<Float>()
+        val n = 4 + (rnd() * 3).toInt()
+        val len = min(power * 1.2f + 10f, 40f) * s
+        for (k in 0 until n) {
+            var a = rnd() * 6.283f
+            var cx = x
+            var cy = y
+            repeat(4) {
+                val l = len * (.6f + rnd() * .6f) / 2f
+                a += (rnd() - .5f) * .9f
+                val nx = cx + cos(a) * l
+                val ny = cy + sin(a) * l
+                seg.add(cx); seg.add(cy); seg.add(nx); seg.add(ny)
+                cx = nx; cy = ny
+            }
+        }
+        cracks.add(seg.toFloatArray())
+        if (cracks.size > 14) cracks.removeAt(0)
+    }
+
+    private fun hitFx(f: Fig, x: Float, y: Float, imp: Float) {
+        val a = abs(imp)
+        if (a > 4f && f.fxCd <= 0) {
+            part(x, y, 0xFFB8B0A0.toInt(), min(10, 2 + (a * .4f).toInt()), 3f)
+            f.fxCd = 6
+        }
+        if (a > 15f && f.crackCd <= 0) {
+            addCrack(x, y, a)
+            f.crackCd = 25
+            if (f.sayT <= 0) say(f, pick(hurtLines[f.mood]), 60)
+        }
     }
 
     private fun cast(f: Fig, kind: String) {
@@ -238,27 +308,122 @@ class StageView(ctx: Context) : View(ctx) {
         }
     }
 
+    private fun enterRag(f: Fig) {
+        f.mode = 4
+        for (i in 0..10) { f.pjx[i] = f.jx[i]; f.pjy[i] = f.jy[i] }
+        f.rest = 0; f.fvx = 0f; f.fvy = 0f; f.bl = 0f
+        f.wantSit = false; f.moving = false; f.walk = 0f; f.vy = 0f
+    }
+
+    private fun exitRag(f: Fig) {
+        for (i in 0..10) { f.sx[i] = f.jx[i]; f.sy[i] = f.jy[i] }
+        f.bl = 1f
+        f.x = f.jx[2].coerceIn(width * .05f, width * .95f)
+        f.face = if (f.jx[1] >= f.jx[2]) 1f else -1f
+        f.yoff = 0f; f.vy = 0f; f.lie = 1f; f.sit = 0f; f.walk = 0f
+        f.mode = 2; f.modeT = 40
+        f.wantSit = false; f.moving = false
+    }
+
+    private fun ragStep(f: Fig) {
+        val g = ground
+        val w = width.toFloat()
+        val gr = f.grab
+        if (gr == null && f.held >= 0) {
+            val h = f.held
+            val lim = 45f * s
+            f.pjx[h] = f.jx[h] - f.fvx.coerceIn(-lim, lim) * 1.4f
+            f.pjy[h] = f.jy[h] - f.fvy.coerceIn(-lim, lim) * 1.4f
+            f.held = -1
+        }
+        val gi = f.held
+        val pinned = gr != null && gi >= 0
+        if (pinned) {
+            f.fvx = lerp(f.fvx, gr!!.x - f.jx[gi], .5f)
+            f.fvy = lerp(f.fvy, gr.y - f.jy[gi], .5f)
+        }
+        for (i in 0..10) {
+            if (pinned && i == gi) continue
+            val vx = (f.jx[i] - f.pjx[i]) * .992f
+            val vy = (f.jy[i] - f.pjy[i]) * .992f
+            f.pjx[i] = f.jx[i]; f.pjy[i] = f.jy[i]
+            f.jx[i] += vx; f.jy[i] += vy + .7f * s
+        }
+        if (pinned) {
+            f.pjx[gi] = f.jx[gi]; f.pjy[gi] = f.jy[gi]
+            f.jx[gi] = gr!!.x; f.jy[gi] = gr.y
+        }
+        repeat(8) {
+            for (c in rc) {
+                val a = c[0].toInt()
+                val b = c[1].toInt()
+                val dx = f.jx[b] - f.jx[a]
+                val dy = f.jy[b] - f.jy[a]
+                val d = max(hypot(dx, dy), .001f)
+                val df = (d - c[2] * s) / d * .5f * c[3]
+                val wa = if (pinned && a == gi) 0f else 1f
+                val wb = if (pinned && b == gi) 0f else 1f
+                val tw = wa + wb
+                if (tw == 0f) continue
+                val fa = 2f * wa / tw
+                val fb = 2f * wb / tw
+                f.jx[a] += dx * df * fa; f.jy[a] += dy * df * fa
+                f.jx[b] -= dx * df * fb; f.jy[b] -= dy * df * fb
+            }
+            for (i in 0..10) {
+                if (pinned && i == gi) continue
+                var x = f.jx[i]
+                var y = f.jy[i]
+                if (y > g) {
+                    val v = y - f.pjy[i]
+                    y = g
+                    f.pjy[i] = y + v * .3f
+                    f.pjx[i] += (x - f.pjx[i]) * .25f
+                    hitFx(f, x, g, v / s)
+                }
+                if (y < 4f) {
+                    val v = y - f.pjy[i]
+                    y = 4f
+                    f.pjy[i] = y + v * .3f
+                    hitFx(f, x, 4f, v / s)
+                }
+                if (x < 8f) {
+                    val v = x - f.pjx[i]
+                    x = 8f
+                    f.pjx[i] = x + v * .4f
+                    hitFx(f, 8f, y, v / s)
+                }
+                if (x > w - 8f) {
+                    val v = x - f.pjx[i]
+                    x = w - 8f
+                    f.pjx[i] = x + v * .4f
+                    hitFx(f, w - 8f, y, v / s)
+                }
+                f.jx[i] = x; f.jy[i] = y
+            }
+        }
+        var mx = 0f
+        for (i in 0..10) mx = max(mx, abs(f.jx[i] - f.pjx[i]) + abs(f.jy[i] - f.pjy[i]))
+        if (!pinned && f.held < 0 && mx < 1.6f * s && f.jy[2] > g - 22f * s) f.rest++ else f.rest = 0
+        if (f.rest > 25) exitRag(f)
+    }
+
     private fun step(f: Fig) {
         f.t2 += .06f
         if (f.sayT > 0) f.sayT--
         if (f.castT > 0) f.castT--
         if (f.waveT > 0) f.waveT--
+        if (f.fxCd > 0) f.fxCd--
+        if (f.crackCd > 0) f.crackCd--
         f.cast = lerp(f.cast, if (f.castT > 0) 1f else 0f, .15f)
         f.wave = lerp(f.wave, if (f.waveT > 0) 1f else 0f, .12f)
         if (f.fireT > 0) {
             f.fireT--
             part(f.jx[6], f.jy[6], if (rnd() < .5f) 0xFFFF7A1A.toInt() else 0xFFFFD23F.toInt(), 2, 3f)
         }
-        val g = f.grab
-        if (g != null) {
-            f.mode = 0
-            f.x += (g.x - f.x) * .5f
-            val target = max(0f, ground - (g.y + 68f * s))
-            f.yoff += (target - f.yoff) * .5f
-            f.vy = 0f
-            f.walk = lerp(f.walk, 0f, .2f); f.sit = lerp(f.sit, 0f, .2f); f.lie = lerp(f.lie, 0f, .2f)
-            f.wantSit = false; f.moving = false; f.timer = 60
-        } else if (f.mode == 1) {
+        if (f.grab != null && f.mode != 4) enterRag(f)
+        if (f.mode == 4) { ragStep(f); return }
+        if (f.mode == 1) {
             f.vy += .7f * s
             f.yoff -= f.vy
             if (f.yoff <= 0f) {
@@ -272,13 +437,19 @@ class StageView(ctx: Context) : View(ctx) {
             f.lie = max(0f, f.lie - .012f)
             if (f.lie <= .01f) {
                 f.lie = 0f; f.mode = 0; f.timer = 100
-                say(f, "أهلاً، أنا " + f.name, 150)
-                f.waveT = 120
+                if (f.greet) {
+                    f.greet = false
+                    say(f, "أهلاً، أنا " + f.name, 150)
+                    f.waveT = 120
+                } else say(f, pick(recLines[f.mood]), 90)
             }
         } else if (f.yoff > 0f || f.vy != 0f) {
             f.vy += .8f * s
             f.yoff -= f.vy
-            if (f.yoff <= 0f) { f.yoff = 0f; f.vy = 0f; f.timer = 40 }
+            if (f.yoff <= 0f) {
+                f.yoff = 0f; f.vy = 0f; f.timer = 40
+                part(f.x, ground, 0xFFB8B0A0.toInt(), 4, 2.5f)
+            }
         } else {
             val spd = when (f.mood) { 0 -> .6f; 1 -> .45f; 2 -> .9f; else -> .3f }
             if (f.wantSit) f.sit = min(1f, f.sit + .04f) else f.sit = max(0f, f.sit - .04f)
@@ -335,7 +506,11 @@ class StageView(ctx: Context) : View(ctx) {
         val neckY = hipY - cos(ang) * 30f * s + sin(f.t2) * .8f * s
         f.jx[2] = hipX; f.jy[2] = hipY
         f.jx[1] = neckX; f.jy[1] = neckY
-        f.jx[0] = neckX; f.jy[0] = neckY - 14f * s
+        val dxn = neckX - hipX
+        val dyn = neckY - hipY
+        val dl = max(hypot(dxn, dyn), .001f)
+        f.jx[0] = neckX + dxn / dl * 14f * s
+        f.jy[0] = neckY + dyn / dl * 14f * s
         val air = if (f.yoff > 3f * s) 1f else 0f
         for (i in 0..1) {
             val ph = f.t + i * pi
@@ -378,7 +553,17 @@ class StageView(ctx: Context) : View(ctx) {
             pending.clear()
             for (id in l) addFig(id)
         }
-        for (f in figs) { step(f); pose(f) }
+        for (f in figs) {
+            step(f)
+            if (f.mode != 4) {
+                pose(f)
+                if (f.bl > 0f) {
+                    f.bl -= .08f
+                    val k = max(f.bl, 0f)
+                    for (i in 0..10) { f.jx[i] = lerp(f.jx[i], f.sx[i], k); f.jy[i] = lerp(f.jy[i], f.sy[i], k) }
+                }
+            }
+        }
         for (q in parts) { q.x += q.vx; q.y += q.vy; q.vy += .15f * s; q.l-- }
         parts.removeAll { it.l <= 0 }
         for (r in rings) r.r += 7f * s
@@ -394,18 +579,24 @@ class StageView(ctx: Context) : View(ctx) {
         last = now
         while (acc >= 1f) { tick(); acc -= 1f }
         for (f in figs) syncHandle(f)
+        for (c in cracks) {
+            paint.color = Color.BLACK; paint.alpha = 120; paint.strokeWidth = 4f * s
+            cv.drawLines(c, paint)
+            paint.color = Color.WHITE; paint.alpha = 235; paint.strokeWidth = 2f * s
+            cv.drawLines(c, paint)
+        }
         for (f in figs) {
-            val sh = max(.4f, 1f - f.yoff / (160f * s))
+            val sh = if (f.mode == 4) .7f else max(.4f, 1f - f.yoff / (160f * s))
             fill.color = Color.BLACK
             fill.alpha = 55
-            cv.drawOval(RectF(f.x - 18f * s * sh, ground + 1f, f.x + 18f * s * sh, ground + 6f * s), fill)
+            cv.drawOval(RectF(f.jx[2] - 18f * s * sh, ground + 1f, f.jx[2] + 18f * s * sh, ground + 6f * s), fill)
             Puppet.draw(cv, f.bm, f.jx, f.jy, f.face, s)
-            cv.drawText(f.name, f.jx[1], f.jy[1] - 28f * s, tp)
+            cv.drawText(f.name, f.jx[0], f.jy[0] - 22f * s, tp)
             if (f.sayT > 0) {
                 val tw = bt.measureText(f.say)
                 val half = tw / 2f + 14f * dn
-                val bx = f.jx[1].coerceIn(half, max(half, width - half))
-                val by = f.jy[1] - 52f * s
+                val bx = f.jx[0].coerceIn(half, max(half, width - half))
+                val by = max(f.jy[0] - 46f * s, 30f * dn)
                 cv.drawRoundRect(RectF(bx - half, by - 18f * dn, bx + half, by + 8f * dn), 14f * dn, 14f * dn, bg)
                 cv.drawText(f.say, bx, by, bt)
             }
