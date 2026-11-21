@@ -10,11 +10,13 @@ import android.view.Gravity
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 
 class OverlayService : Service() {
     private lateinit var wm: WindowManager
     private var stage: StageView? = null
     private var panel: LinearLayout? = null
+    private var finger = false
 
     override fun onBind(i: Intent?): IBinder? = null
 
@@ -43,7 +45,7 @@ class OverlayService : Service() {
 
         val pn = LinearLayout(this)
         pn.orientation = LinearLayout.VERTICAL
-        fun btn(txt: String, act: () -> Unit) {
+        fun btn(txt: String, act: () -> Unit): TextView {
             val v = TextView(this)
             v.text = txt
             v.textSize = 26f
@@ -57,12 +59,20 @@ class OverlayService : Service() {
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             lp.setMargins(0, 8, 0, 8)
             pn.addView(v, lp)
+            return v
         }
         btn("⚡") { st.power("bolt") }
         btn("🔥") { st.power("fire") }
         btn("❄️") { st.power("ice") }
         btn("💥") { st.power("blast") }
         btn("🔧") { st.repair() }
+        var fb: TextView? = null
+        fb = btn("👆") {
+            finger = !finger
+            st.setFinger(finger)
+            (fb?.background as? GradientDrawable)?.setColor(if (finger) 0xFF2F7DE1.toInt() else 0xAA222222.toInt())
+            if (finger) Toast.makeText(this, "وضع الإصبع: المس الشاشة. اضغط 👆 مرة ثانية للخروج", Toast.LENGTH_LONG).show()
+        }
         btn("✖") { stopSelf() }
         val pp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type,
