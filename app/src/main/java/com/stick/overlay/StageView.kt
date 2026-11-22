@@ -555,7 +555,7 @@ class StageView(ctx: Context) : View(ctx) {
     }
 
     private fun think(f: Fig, text: String) {
-        val key = (fxp.getString("gkey", "") ?: "").trim()
+        val key = "local"
         if (key.isEmpty()) {
             doAct(f, localAct(text))
             say(f, pick(okLines[f.mood]), 150)
