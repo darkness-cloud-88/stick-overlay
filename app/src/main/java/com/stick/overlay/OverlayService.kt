@@ -7,6 +7,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
 import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -17,6 +18,7 @@ class OverlayService : Service() {
     private var stage: StageView? = null
     private var panel: LinearLayout? = null
     private var finger = false
+    private var hidden = false
 
     override fun onBind(i: Intent?): IBinder? = null
 
@@ -45,7 +47,8 @@ class OverlayService : Service() {
 
         val pn = LinearLayout(this)
         pn.orientation = LinearLayout.VERTICAL
-        fun btn(txt: String, act: () -> Unit): TextView {
+        val others = ArrayList<View>()
+        fun btn(txt: String, keep: Boolean, act: () -> Unit): TextView {
             val v = TextView(this)
             v.text = txt
             v.textSize = 26f
@@ -59,21 +62,28 @@ class OverlayService : Service() {
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             lp.setMargins(0, 8, 0, 8)
             pn.addView(v, lp)
+            if (!keep) others.add(v)
             return v
         }
-        btn("⚡") { st.power("bolt") }
-        btn("🔥") { st.power("fire") }
-        btn("❄️") { st.power("ice") }
-        btn("💥") { st.power("blast") }
-        btn("🔧") { st.repair() }
+        var eye: TextView? = null
+        eye = btn("👁", true) {
+            hidden = !hidden
+            for (v in others) v.visibility = if (hidden) View.GONE else View.VISIBLE
+            eye?.alpha = if (hidden) .5f else 1f
+        }
+        btn("⚡", false) { st.power("bolt") }
+        btn("🔥", false) { st.power("fire") }
+        btn("❄️", false) { st.power("ice") }
+        btn("💥", false) { st.power("blast") }
+        btn("🔧", false) { st.repair() }
         var fb: TextView? = null
-        fb = btn("👆") {
+        fb = btn("👆", false) {
             finger = !finger
             st.setFinger(finger)
             (fb?.background as? GradientDrawable)?.setColor(if (finger) 0xFF2F7DE1.toInt() else 0xAA222222.toInt())
             if (finger) Toast.makeText(this, "وضع الإصبع: المس الشاشة. اضغط 👆 مرة ثانية للخروج", Toast.LENGTH_LONG).show()
         }
-        btn("✖") { stopSelf() }
+        btn("✖", false) { stopSelf() }
         val pp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
