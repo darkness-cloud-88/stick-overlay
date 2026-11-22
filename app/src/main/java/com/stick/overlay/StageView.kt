@@ -2,8 +2,10 @@ package com.stick.overlay
 import android.content.Context
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
+import android.text.InputType
 import android.view.*
 import android.widget.*
+import org.json.JSONObject
 import kotlin.math.*
 
 object Puppet {
@@ -101,7 +103,6 @@ class Fig(val id: String, var name: String, val mood: Int, val bm: Array<Bitmap>
 }
 class Part(var x: Float, var y: Float, var vx: Float, var vy: Float, var l: Int, val c: Int, val r: Float)
 class Ring(val x: Float, val y: Float, var r: Float, val m: Float, val c: Int)
-
 class StageView(ctx: Context) : View(ctx) {
     private val dn = ctx.resources.displayMetrics.density
     private val s = dn * 1.05f
@@ -127,6 +128,12 @@ class StageView(ctx: Context) : View(ctx) {
         arrayOf("هل انتهينا؟", "رأسي يدور.."),
         arrayOf("ممتع! مرة ثانية!", "هاها!"),
         arrayOf("آه.. أحتاج راحة", "كان ذلك كافياً"))
+    private val okLines = arrayOf(
+        arrayOf("حاضر!", "أمرك!"),
+        arrayOf("حسناً.. سأحاول", "أوه.. حسناً"),
+        arrayOf("هاها! حاضر!", "ممتع! سأفعلها!"),
+        arrayOf("حسناً.. ببطء", "آه.. حسناً"))
+    private val moodDesc = arrayOf("شجاع وواثق ومرح", "خجول ولطيف ويخاف بسهولة", "مشاغب وكثير المزاح", "كسول ويحب النوم والراحة")
     private val showLines = arrayOf("شاهد هذا!", "انظر ماذا أفعل!", "أنا أتدرب فقط")
     private val rc = arrayOf(
         floatArrayOf(0f, 1f, 14f, 1f), floatArrayOf(1f, 2f, 30f, 1f), floatArrayOf(1f, 3f, 15f, 1f),
@@ -294,8 +301,7 @@ class StageView(ctx: Context) : View(ctx) {
         f.hx = nx; f.hy = ny; f.hw = nw; f.hh = nh
         try { wm.updateViewLayout(v, lp) } catch (e: Exception) {}
     }
-
-    private fun openMenu(f: Fig) {
+        private fun openMenu(f: Fig) {
         closeMenu()
         val c = context
         f.busy = true
@@ -312,6 +318,26 @@ class StageView(ctx: Context) : View(ctx) {
         title.textSize = 18f
         title.gravity = Gravity.CENTER
         box.addView(title)
+        val rm = LinearLayout(c)
+        rm.gravity = Gravity.CENTER_VERTICAL
+        val me = EditText(c)
+        me.setText(f.name + " ")
+        me.setSelection(me.text.length)
+        me.hint = "اكتب رسالة أو أمراً"
+        me.setTextColor(Color.WHITE)
+        me.setHintTextColor(Color.GRAY)
+        rm.addView(me, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val snd = Button(c)
+        snd.text = "إرسال"
+        snd.setOnClickListener { sendMsg(me.text.toString()) }
+        rm.addView(snd)
+        box.addView(rm)
+        val note = TextView(c)
+        note.text = "اذكر اسم الشخصية ليردّ عليك"
+        note.setTextColor(0xFFAAB4C0.toInt())
+        note.textSize = 12f
+        note.gravity = Gravity.CENTER
+        box.addView(note)
         val r1 = LinearLayout(c)
         r1.gravity = Gravity.CENTER
         for ((em, k) in listOf("⚡" to "bolt", "🔥" to "fire", "❄️" to "ice", "💥" to "blast")) {
@@ -364,6 +390,37 @@ class StageView(ctx: Context) : View(ctx) {
         }
         r3.addView(ok)
         box.addView(r3)
+        val has = (fxp.getString("gkey", "") ?: "").isNotEmpty()
+        val kt = TextView(c)
+        kt.text = if (has) "🔑 مفتاح Gemini ✓" else "🔑 مفتاح Gemini (اضغط لإضافته)"
+        kt.setTextColor(0xFFAAB4C0.toInt())
+        kt.setPadding(0, dp(10), 0, dp(4))
+        kt.gravity = Gravity.CENTER
+        box.addView(kt)
+        val kr = LinearLayout(c)
+        kr.gravity = Gravity.CENTER_VERTICAL
+        kr.visibility = View.GONE
+        val ke = EditText(c)
+        ke.hint = "الصق المفتاح هنا"
+        ke.setTextColor(Color.WHITE)
+        ke.setHintTextColor(Color.GRAY)
+        ke.isSingleLine = true
+        ke.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        kr.addView(ke, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val ks = Button(c)
+        ks.text = "حفظ المفتاح"
+        ks.setOnClickListener {
+            val k = ke.text.toString().trim()
+            if (k.isNotEmpty()) {
+                fxp.edit().putString("gkey", k).apply()
+                kt.text = "🔑 مفتاح Gemini ✓"
+                Toast.makeText(c, "تم حفظ المفتاح", Toast.LENGTH_SHORT).show()
+            }
+            kr.visibility = View.GONE
+        }
+        kr.addView(ks)
+        kt.setOnClickListener { kr.visibility = if (kr.visibility == View.GONE) View.VISIBLE else View.GONE }
+        box.addView(kr)
         val cl = TextView(c)
         cl.text = "إغلاق"
         cl.setTextColor(0xFFAAB4C0.toInt())
@@ -371,17 +428,19 @@ class StageView(ctx: Context) : View(ctx) {
         cl.setPadding(0, dp(10), 0, dp(4))
         cl.setOnClickListener { closeMenu() }
         box.addView(cl)
-        box.setOnTouchListener { _, e ->
+        val sv = ScrollView(c)
+        sv.addView(box)
+        sv.setOnTouchListener { _, e ->
             if (e.action == MotionEvent.ACTION_OUTSIDE) { closeMenu(); true } else false
         }
         val lp = WindowManager.LayoutParams(
-            dp(300), WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            dp(300), (height * .5f).toInt(), WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT)
         lp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
         lp.y = dp(70)
-        try { wm.addView(box, lp); menu = box } catch (e: Exception) { f.busy = false }
+        try { wm.addView(sv, lp); menu = sv } catch (e: Exception) { f.busy = false }
     }
 
     private fun closeMenu() {
@@ -453,6 +512,87 @@ class StageView(ctx: Context) : View(ctx) {
         cast(figs[(rnd() * figs.size).toInt().coerceIn(0, figs.size - 1)], kind)
     }
 
+    private fun localAct(t: String): String {
+        fun has(vararg w: String) = w.any { t.contains(it) }
+        return when {
+            has("اجلس", "جلوس", "ارتح") -> "sit"
+            has("قف", "انهض", "قم") -> "stand"
+            has("لوح", "سلم", "مرحب") -> "wave"
+            has("اقفز", "نط", "قفز") -> "jump"
+            has("يمين") -> "walk_right"
+            has("يسار") -> "walk_left"
+            has("صاعق", "برق") -> "bolt"
+            has("نار", "احرق") -> "fire"
+            has("جليد", "ثلج", "جمد") -> "ice"
+            has("انفجار", "فجر") -> "blast"
+            else -> "none"
+        }
+    }
+
+    private fun doAct(f: Fig, a: String) {
+        if (f.mode != 0 || f.grab != null) return
+        when (a) {
+            "walk_left" -> { f.wx = max(width * .08f, f.x - width * .35f); f.moving = true; f.wantSit = false }
+            "walk_right" -> { f.wx = min(width * .92f, f.x + width * .35f); f.moving = true; f.wantSit = false }
+            "sit" -> { f.wantSit = true; f.moving = false; f.timer = 500 }
+            "stand" -> { f.wantSit = false; f.timer = 80 }
+            "wave" -> { f.waveT = 150 }
+            "jump" -> { if (f.yoff <= 0f) f.vy = -10f * s }
+            "bolt", "fire", "ice", "blast" -> cast(f, a)
+        }
+    }
+
+    private fun sendMsg(text: String) {
+        val t = text.trim()
+        if (t.isEmpty()) return
+        val targets = figs.filter { t.contains(it.name, true) }.take(3)
+        closeMenu()
+        if (targets.isEmpty()) {
+            Toast.makeText(context, "اذكر اسم الشخصية في رسالتك", Toast.LENGTH_SHORT).show()
+            return
+        }
+        for (f in targets) think(f, t)
+    }
+
+    private fun think(f: Fig, text: String) {
+        val key = (fxp.getString("gkey", "") ?: "").trim()
+        if (key.isEmpty()) {
+            doAct(f, localAct(text))
+            say(f, pick(okLines[f.mood]), 150)
+            return
+        }
+        say(f, "...", 600)
+        val sys = "أنت \"" + f.name + "\"، شخصية عصا صغيرة تعيش على شاشة هاتف صديقك. مزاجك: " + moodDesc[f.mood] +
+            ". ردّ بجملة عربية قصيرة جداً (أقل من 12 كلمة) تناسب مزاجك. واختر حركة واحدة من: " + Brain.acts +
+            " تناسب طلب صديقك، أو none إن لم يطلب حركة. أعد JSON فقط بالشكل {\"say\":\"...\",\"do\":\"...\"}"
+        Brain.ask(context, key, sys, text) { res, err ->
+            post {
+                if (res == null) {
+                    doAct(f, localAct(text))
+                    val m = when (err) {
+                        "quota" -> "انتهت حصة اليوم المجانية"
+                        "key" -> "المفتاح غير صحيح"
+                        "net" -> "لا يوجد إنترنت"
+                        else -> "تعذّر الاتصال"
+                    }
+                    say(f, m, 150)
+                } else {
+                    var sy = ""
+                    var act = "none"
+                    try {
+                        val t = res.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+                        val o = JSONObject(t)
+                        sy = o.optString("say")
+                        act = o.optString("do", "none")
+                    } catch (e: Exception) { sy = res.trim().take(60) }
+                    if (act.isEmpty() || act == "none") act = localAct(text)
+                    doAct(f, act)
+                    say(f, if (sy.isEmpty()) pick(okLines[f.mood]) else sy, 200)
+                }
+            }
+        }
+    }
+
     private fun choose(f: Fig) {
         if (f.sit > .05f || f.wantSit) {
             if (rnd() < .5f) { f.wantSit = true; f.timer = 150 + (rnd() * 250).toInt() }
@@ -470,8 +610,7 @@ class StageView(ctx: Context) : View(ctx) {
             else -> f.timer = 80 + (rnd() * 120).toInt()
         }
     }
-
-    private fun enterRag(f: Fig) {
+        private fun enterRag(f: Fig) {
         f.mode = 4
         f.plat = -1f
         for (i in 0..10) { f.pjx[i] = f.jx[i]; f.pjy[i] = f.jy[i] }
@@ -571,7 +710,9 @@ class StageView(ctx: Context) : View(ctx) {
         for (i in 0..10) mx = max(mx, abs(f.jx[i] - f.pjx[i]) + abs(f.jy[i] - f.pjy[i]))
         if (!pinned && f.held < 0 && mx < 1.6f * s && f.jy[2] > g - 22f * s) f.rest++ else f.rest = 0
         if (f.rest > 25) exitRag(f)
-    }    private fun step(f: Fig) {
+    }
+
+    private fun step(f: Fig) {
         f.t2 += .06f
         if (f.sayT > 0) f.sayT--
         if (f.castT > 0) f.castT--
@@ -654,8 +795,10 @@ class StageView(ctx: Context) : View(ctx) {
                     }
                     if (f.moving) {
                         val dx = f.wx - f.x
-                        if (abs(dx) < 4f * s || f.sit > .05f) {
+                        if (abs(dx) < 4f * s) {
                             f.moving = false; f.timer = 40 + (rnd() * 80).toInt()
+                        } else if (f.sit > .3f) {
+                            f.walk = lerp(f.walk, 0f, .1f)
                         } else {
                             val sp = if (chase) spd * 2.2f else spd
                             f.face = if (dx > 0f) 1f else -1f
@@ -675,8 +818,7 @@ class StageView(ctx: Context) : View(ctx) {
         val w = width.toFloat()
         f.x = f.x.coerceIn(w * .05f, w * .95f)
     }
-
-    private fun ik(hx: Float, hy: Float, fx: Float, fy: Float, l1: Float, l2: Float, bend: Float) {
+        private fun ik(hx: Float, hy: Float, fx: Float, fy: Float, l1: Float, l2: Float, bend: Float) {
         val dx = fx - hx
         val dy = fy - hy
         val d0 = max(hypot(dx, dy), .001f)
