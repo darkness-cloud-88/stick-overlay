@@ -201,6 +201,7 @@ class MainActivity : Activity() {
         h.text = "ارسم شخصيتك واحفظها، ثم اضغط «تحرك» لتظهر على شاشتك."
         h.gravity = Gravity.CENTER; h.setPadding(0, dp(8), 0, dp(12)); h.setTextColor(0xFF4A5565.toInt())
         col.addView(h)
+        col.addView(btn("🌐 اللاعبون المتعددون", 0xFFE8F0FE.toInt()) { startActivity(Intent(this, NetActivity::class.java)) }, lp(MATCH, WRAP))
         col.addView(btn("+ شخصية جديدة", 0xFF2F7DE1.toInt(), Color.WHITE) { showDraw(null) }, lp(MATCH, WRAP))
         col.addView(btn("إيقاف الأصدقاء") { stopService(Intent(this, OverlayService::class.java)) }, lp(MATCH, WRAP))
         for (id in Store.ids(this)) {
