@@ -2,7 +2,6 @@ package com.stick.overlay
 import android.content.Context
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
-import android.text.InputType
 import android.view.*
 import android.widget.*
 import org.json.JSONObject
@@ -97,6 +96,9 @@ class Fig(val id: String, var name: String, val mood: Int, val bm: Array<Bitmap>
     var lastTap = 0L
     var hue = 0
     var hm: ColorMatrix? = null
+    var remote = false; var sid = ""; var link: Link? = null
+    var inDx = 0; var inJump = false; var inSit = false; var inPunch = false
+    var punchT = 0; var punch = 0f
     var handle: View? = null
     var hlp: WindowManager.LayoutParams? = null
     var hx = -1; var hy = -1; var hw = -1; var hh = -1
@@ -128,11 +130,6 @@ class StageView(ctx: Context) : View(ctx) {
         arrayOf("هل انتهينا؟", "رأسي يدور.."),
         arrayOf("ممتع! مرة ثانية!", "هاها!"),
         arrayOf("آه.. أحتاج راحة", "كان ذلك كافياً"))
-    private val okLines = arrayOf(
-        arrayOf("حاضر!", "أمرك!"),
-        arrayOf("حسناً.. سأحاول", "أوه.. حسناً"),
-        arrayOf("هاها! حاضر!", "ممتع! سأفعلها!"),
-        arrayOf("حسناً.. ببطء", "آه.. حسناً"))
     private val moodDesc = arrayOf("شجاع وواثق ومرح", "خجول ولطيف ويخاف بسهولة", "مشاغب وكثير المزاح", "كسول ويحب النوم والراحة")
     private val showLines = arrayOf("شاهد هذا!", "انظر ماذا أفعل!", "أنا أتدرب فقط")
     private val rc = arrayOf(
@@ -215,9 +212,13 @@ class StageView(ctx: Context) : View(ctx) {
     }
 
     private fun addFig(id: String) {
-        for (o in figs.filter { it.id == id }) removeHandle(o)
-        figs.removeAll { it.id == id }
-        if (figs.size >= 6) { val o = figs.removeAt(0); removeHandle(o) }
+        for (o in figs.filter { it.id == id && !it.remote }) removeHandle(o)
+        figs.removeAll { it.id == id && !it.remote }
+        if (figs.count { !it.remote } >= 6) {
+            val o = figs.first { !it.remote }
+            figs.remove(o)
+            removeHandle(o)
+        }
         val f = Fig(id, Store.name(context, id), abs(id.hashCode()) % 4, Store.load(context, id))
         f.hue = fxp.getInt("hue_" + id, 0)
         f.hm = hueMatrix(f.hue)
@@ -257,7 +258,7 @@ class StageView(ctx: Context) : View(ctx) {
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (f.grab != null) f.grab = null
                     else if (!moved && e.eventTime - downT < 300) {
-                        if (e.eventTime - f.lastTap < 450) {
+                        if (e.eventTime - f.lastTap < 450 && !f.remote) {
                             f.lastTap = 0L
                             openMenu(f)
                         } else {
@@ -390,37 +391,6 @@ class StageView(ctx: Context) : View(ctx) {
         }
         r3.addView(ok)
         box.addView(r3)
-        val has = (fxp.getString("gkey", "") ?: "").isNotEmpty()
-        val kt = TextView(c)
-        kt.text = if (has) "🔑 مفتاح Gemini ✓" else "🔑 مفتاح Gemini (اضغط لإضافته)"
-        kt.setTextColor(0xFFAAB4C0.toInt())
-        kt.setPadding(0, dp(10), 0, dp(4))
-        kt.gravity = Gravity.CENTER
-        box.addView(kt)
-        val kr = LinearLayout(c)
-        kr.gravity = Gravity.CENTER_VERTICAL
-        kr.visibility = View.GONE
-        val ke = EditText(c)
-        ke.hint = "الصق المفتاح هنا"
-        ke.setTextColor(Color.WHITE)
-        ke.setHintTextColor(Color.GRAY)
-        ke.isSingleLine = true
-        ke.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-        kr.addView(ke, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        val ks = Button(c)
-        ks.text = "حفظ المفتاح"
-        ks.setOnClickListener {
-            val k = ke.text.toString().trim()
-            if (k.isNotEmpty()) {
-                fxp.edit().putString("gkey", k).apply()
-                kt.text = "🔑 مفتاح Gemini ✓"
-                Toast.makeText(c, "تم حفظ المفتاح", Toast.LENGTH_SHORT).show()
-            }
-            kr.visibility = View.GONE
-        }
-        kr.addView(ks)
-        kt.setOnClickListener { kr.visibility = if (kr.visibility == View.GONE) View.VISIBLE else View.GONE }
-        box.addView(kr)
         val cl = TextView(c)
         cl.text = "إغلاق"
         cl.setTextColor(0xFFAAB4C0.toInt())
@@ -486,8 +456,7 @@ class StageView(ctx: Context) : View(ctx) {
             if (f.sayT <= 0) say(f, pick(hurtLines[f.mood]), 60)
         }
     }
-
-    private fun cast(f: Fig, kind: String) {
+        private fun cast(f: Fig, kind: String) {
         if (f.mode != 0) return
         f.castT = 60
         f.wantSit = false
@@ -508,25 +477,9 @@ class StageView(ctx: Context) : View(ctx) {
     }
 
     fun power(kind: String) {
-        if (figs.isEmpty()) return
-        cast(figs[(rnd() * figs.size).toInt().coerceIn(0, figs.size - 1)], kind)
-    }
-
-    private fun localAct(t: String): String {
-        fun has(vararg w: String) = w.any { t.contains(it) }
-        return when {
-            has("اجلس", "جلوس", "ارتح") -> "sit"
-            has("قف", "انهض", "قم") -> "stand"
-            has("لوح", "سلم", "مرحب") -> "wave"
-            has("اقفز", "نط", "قفز") -> "jump"
-            has("يمين") -> "walk_right"
-            has("يسار") -> "walk_left"
-            has("صاعق", "برق") -> "bolt"
-            has("نار", "احرق") -> "fire"
-            has("جليد", "ثلج", "جمد") -> "ice"
-            has("انفجار", "فجر") -> "blast"
-            else -> "none"
-        }
+        val l = figs.filter { !it.remote }
+        if (l.isEmpty()) return
+        cast(l[(rnd() * l.size).toInt().coerceIn(0, l.size - 1)], kind)
     }
 
     private fun doAct(f: Fig, a: String) {
@@ -545,7 +498,7 @@ class StageView(ctx: Context) : View(ctx) {
     private fun sendMsg(text: String) {
         val t = text.trim()
         if (t.isEmpty()) return
-        val targets = figs.filter { t.contains(it.name, true) }.take(3)
+        val targets = figs.filter { !it.remote && t.contains(it.name, true) }.take(3)
         closeMenu()
         if (targets.isEmpty()) {
             Toast.makeText(context, "اذكر اسم الشخصية في رسالتك", Toast.LENGTH_SHORT).show()
@@ -555,40 +508,18 @@ class StageView(ctx: Context) : View(ctx) {
     }
 
     private fun think(f: Fig, text: String) {
-        val key = "local"
-        if (key.isEmpty()) {
-            doAct(f, localAct(text))
-            say(f, pick(okLines[f.mood]), 150)
-            return
-        }
-        say(f, "...", 600)
-        val sys = "أنت \"" + f.name + "\"، شخصية عصا صغيرة تعيش على شاشة هاتف صديقك. مزاجك: " + moodDesc[f.mood] +
-            ". ردّ بجملة عربية قصيرة جداً (أقل من 12 كلمة) تناسب مزاجك. واختر حركة واحدة من: " + Brain.acts +
-            " تناسب طلب صديقك، أو none إن لم يطلب حركة. أعد JSON فقط بالشكل {\"say\":\"...\",\"do\":\"...\"}"
-        Brain.ask(context, key, sys, text) { res, err ->
+        val sys = "أنت \"" + f.name + "\". مزاجك: " + moodDesc[f.mood] + "."
+        Brain.ask(context, "", sys, text) { res, _ ->
             post {
-                if (res == null) {
-                    doAct(f, localAct(text))
-                    val m = when (err) {
-                        "quota" -> "انتهت حصة اليوم المجانية"
-                        "key" -> "المفتاح غير صحيح"
-                        "net" -> "لا يوجد إنترنت"
-                        else -> "تعذّر الاتصال"
-                    }
-                    say(f, m, 150)
-                } else {
-                    var sy = ""
-                    var act = "none"
-                    try {
-                        val t = res.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-                        val o = JSONObject(t)
-                        sy = o.optString("say")
-                        act = o.optString("do", "none")
-                    } catch (e: Exception) { sy = res.trim().take(60) }
-                    if (act.isEmpty() || act == "none") act = localAct(text)
-                    doAct(f, act)
-                    say(f, if (sy.isEmpty()) pick(okLines[f.mood]) else sy, 200)
-                }
+                var sy = ""
+                var act = "none"
+                try {
+                    val o = JSONObject(res ?: "{}")
+                    sy = o.optString("say")
+                    act = o.optString("do", "none")
+                } catch (e: Exception) {}
+                doAct(f, act)
+                if (sy.isNotEmpty()) say(f, sy, 200)
             }
         }
     }
@@ -609,6 +540,118 @@ class StageView(ctx: Context) : View(ctx) {
             f.mood == 2 && r < pSit + pWalk + .2f -> { f.vy = -9f * s; f.timer = 90 }
             else -> f.timer = 80 + (rnd() * 120).toInt()
         }
+    }
+
+    fun addVisitor(sid: String, name: String, bms: Array<Bitmap>, link: Link) {
+        val f = Fig("v" + sid, name, abs(sid.hashCode()) % 4, bms)
+        f.remote = true
+        f.sid = sid
+        f.link = link
+        f.x = width * (.15f + rnd() * .7f)
+        f.yoff = ground - 40f * dn
+        f.face = if (rnd() < .5f) 1f else -1f
+        figs.add(f)
+        pose(f)
+        makeHandle(f)
+    }
+
+    fun hideFig(id: String) {
+        for (o in figs.filter { it.id == id && !it.remote }) removeHandle(o)
+        figs.removeAll { it.id == id && !it.remote }
+    }
+
+    fun remoteInput(sid: String, dx: Int, j: Boolean, si: Boolean, pu: Boolean) {
+        for (f in figs) if (f.remote && f.sid == sid) {
+            f.inDx = dx.coerceIn(-1, 1)
+            f.inJump = j
+            f.inSit = si
+            if (pu) f.inPunch = true
+        }
+    }
+
+    fun removeVisitor(sid: String) {
+        for (o in figs.filter { it.remote && it.sid == sid }) removeHandle(o)
+        figs.removeAll { it.remote && it.sid == sid }
+    }
+
+    fun kickAll() {
+        for (f in figs.filter { it.remote }) {
+            f.link?.bye()
+            removeHandle(f)
+        }
+        figs.removeAll { it.remote }
+    }
+
+    fun askVisit(name: String, cb: (Boolean) -> Unit) {
+        val c = context
+        val box = LinearLayout(c)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(18), dp(16), dp(18), dp(16))
+        val bgd = GradientDrawable()
+        bgd.setColor(0xF2202733.toInt())
+        bgd.cornerRadius = dp(18).toFloat()
+        box.background = bgd
+        val t = TextView(c)
+        t.text = "«" + name + "» يريد زيارة هاتفك"
+        t.setTextColor(Color.WHITE)
+        t.textSize = 17f
+        t.gravity = Gravity.CENTER
+        box.addView(t)
+        val row = LinearLayout(c)
+        row.gravity = Gravity.CENTER
+        var done = false
+        fun finish(ok: Boolean) {
+            if (done) return
+            done = true
+            try { wm.removeView(box) } catch (e: Exception) {}
+            cb(ok)
+        }
+        val yes = Button(c)
+        yes.text = "قبول"
+        yes.setOnClickListener { finish(true) }
+        val no = Button(c)
+        no.text = "رفض"
+        no.setOnClickListener { finish(false) }
+        row.addView(yes)
+        row.addView(no)
+        box.addView(row)
+        val lp = WindowManager.LayoutParams(
+            dp(300), WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT)
+        lp.gravity = Gravity.CENTER
+        try { wm.addView(box, lp) } catch (e: Exception) { cb(false); return }
+        postDelayed({ finish(false) }, 30000)
+    }
+
+    private fun punch(f: Fig) {
+        f.punchT = 14
+        val reach = 75f * s
+        for (o in figs) {
+            if (o === f || o.grab != null) continue
+            val dx = o.jx[2] - f.x
+            if (abs(dx) < reach && dx * f.face > -12f * s && abs(o.jy[2] - f.jy[2]) < 70f * s) {
+                if (o.mode != 4) enterRag(o)
+                for (i in 0..10) { o.pjx[i] -= f.face * 9f * s; o.pjy[i] += 5f * s }
+                part(o.jx[1], o.jy[1], 0xFFFFCF33.toInt(), 6, 5f)
+            }
+        }
+    }
+
+    private fun remoteStep(f: Fig) {
+        f.moving = false
+        f.wantSit = f.inSit
+        f.sit = if (f.inSit) min(1f, f.sit + .06f) else max(0f, f.sit - .06f)
+        if (f.sit < .3f) {
+            if (f.inDx != 0) {
+                f.face = f.inDx.toFloat()
+                f.x += f.inDx * 1.7f * s
+                f.walk = lerp(f.walk, 1f, .15f)
+                f.t += .22f
+            } else f.walk = lerp(f.walk, 0f, .15f)
+            if (f.inJump && f.yoff <= 0f && f.vy == 0f) f.vy = -11f * s
+        } else f.walk = lerp(f.walk, 0f, .15f)
+        if (f.inPunch) { f.inPunch = false; punch(f) }
     }
         private fun enterRag(f: Fig) {
         f.mode = 4
@@ -717,17 +760,19 @@ class StageView(ctx: Context) : View(ctx) {
         if (f.sayT > 0) f.sayT--
         if (f.castT > 0) f.castT--
         if (f.waveT > 0) f.waveT--
+        if (f.punchT > 0) f.punchT--
         if (f.fxCd > 0) f.fxCd--
         if (f.crackCd > 0) f.crackCd--
         f.cast = lerp(f.cast, if (f.castT > 0) 1f else 0f, .15f)
         f.wave = lerp(f.wave, if (f.waveT > 0) 1f else 0f, .12f)
+        f.punch = lerp(f.punch, if (f.punchT > 0) 1f else 0f, .35f)
         if (f.fireT > 0) {
             f.fireT--
             part(f.jx[6], f.jy[6], if (rnd() < .5f) 0xFFFF7A1A.toInt() else 0xFFFFD23F.toInt(), 2, 3f)
         }
         if (f.grab != null && f.mode != 4) enterRag(f)
         if (f.mode == 4) { ragStep(f); return }
-        val chase = finger && tDown
+        val chase = finger && tDown && !f.remote
         if (f.mode == 1) {
             f.vy += .7f * s
             f.yoff -= f.vy
@@ -770,10 +815,13 @@ class StageView(ctx: Context) : View(ctx) {
         } else if (f.yoff > 0f || f.vy != 0f) {
             f.vy += .8f * s
             f.yoff -= f.vy
+            if (f.remote && f.inDx != 0) { f.face = f.inDx.toFloat(); f.x += f.inDx * 1.4f * s }
             if (f.yoff <= 0f) {
                 f.yoff = 0f; f.vy = 0f; f.timer = 40
                 part(f.x, ground, 0xFFB8B0A0.toInt(), 4, 2.5f)
             }
+        } else if (f.remote) {
+            remoteStep(f)
         } else {
             val spd = when (f.mood) { 0 -> .6f; 1 -> .45f; 2 -> .9f; else -> .3f }
             if (f.busy) {
@@ -878,6 +926,8 @@ class StageView(ctx: Context) : View(ctx) {
             if (i == 1) {
                 hx = lerp(hx, neckX + face * 14f * s + sin(f.t2 * 4f) * 7f * s, f.wave * nl)
                 hy = lerp(hy, neckY - 22f * s, f.wave * nl)
+                hx = lerp(hx, neckX + face * 34f * s, f.punch * nl)
+                hy = lerp(hy, neckY + 6f * s, f.punch * nl)
             }
             hx = lerp(hx, neckX + side * 12f * s, f.cast * nl)
             hy = lerp(hy, neckY - 28f * s, f.cast * nl)
@@ -933,7 +983,7 @@ class StageView(ctx: Context) : View(ctx) {
                 cv.drawOval(RectF(f.jx[2] - 18f * s * sh, ground + 1f, f.jx[2] + 18f * s * sh, ground + 6f * s), fill)
             }
             Puppet.draw(cv, f.bm, f.jx, f.jy, f.face, s, f.hm)
-            cv.drawText(f.name, f.jx[0], f.jy[0] - 22f * s, tp)
+            cv.drawText((if (f.remote) "🌐 " else "") + f.name, f.jx[0], f.jy[0] - 22f * s, tp)
             if (f.sayT > 0) {
                 val tw = bt.measureText(f.say)
                 val half = tw / 2f + 14f * dn
