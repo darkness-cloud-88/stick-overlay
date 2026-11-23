@@ -44,6 +44,9 @@ class OverlayService : Service() {
     private var visitId = ""
     private var stickW: View? = null
     private var punchW: View? = null
+    private var mini: Mini? = null
+    private var mySid = ""
+    private var visitBms: Array<Bitmap>? = null
 
     override fun onBind(i: Intent?): IBinder? = null
 
@@ -150,9 +153,37 @@ class OverlayService : Service() {
     private fun hideControls() {
         stickW?.let { try { wm.removeView(it) } catch (e: Exception) {} }
         punchW?.let { try { wm.removeView(it) } catch (e: Exception) {} }
+        mini?.let { try { wm.removeView(it) } catch (e: Exception) {} }
         stickW = null
         punchW = null
+        mini = null
         Ctl.dx = 0; Ctl.jump = false; Ctl.sit = false; Ctl.punch = false
+    }
+
+    private fun onFrame(m: JSONObject) {
+        if (!visiting || hidden) return
+        var mv = mini
+        if (mv == null) {
+            val bms = visitBms ?: return
+            val d = resources.displayMetrics.density
+            val hw = Math.max(m.optInt("w", 1), 1).toFloat()
+            val hh = Math.max(m.optInt("h", 1), 1).toFloat()
+            val wpx = (120 * d).toInt()
+            val hpx = (wpx * hh / hw).toInt().coerceIn((100 * d).toInt(), (420 * d).toInt())
+            val nv = Mini(this, bms, mySid)
+            val lp = WindowManager.LayoutParams(
+                wpx, hpx, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT)
+            lp.gravity = Gravity.TOP or Gravity.RIGHT
+            lp.x = (8 * d).toInt()
+            lp.y = (56 * d).toInt()
+            try { wm.addView(nv, lp) } catch (e: Exception) { return }
+            mini = nv
+            mv = nv
+        }
+        mv.update(m)
     }
 
     private fun startHost(code: String) {
@@ -232,7 +263,7 @@ class OverlayService : Service() {
             }
             sid = System.nanoTime().toString()
             visitors++
-            l.send(JSONObject().put("t", "ok"))
+            l.send(JSONObject().put("t", "ok").put("sid", sid))
             l.sock.soTimeout = 8000
             val s0 = sid
             ui.post { stage?.addVisitor(s0, name, bms, l) }
@@ -282,6 +313,8 @@ class OverlayService : Service() {
                     s.soTimeout = 0
                     started = true
                     link = lk
+                    mySid = r.optString("sid")
+                    visitBms = bms
                     visiting = true
                     visitId = id
                     ui.post {
@@ -298,7 +331,9 @@ class OverlayService : Service() {
                     }.start()
                     while (lk.alive) {
                         val m = lk.read() ?: break
-                        if (m.optString("t") == "bye") break
+                        val t = m.optString("t")
+                        if (t == "bye") break
+                        if (t == "st") ui.post { onFrame(m) }
                     }
                 } else {
                     val why = r?.optString("why") ?: ""
