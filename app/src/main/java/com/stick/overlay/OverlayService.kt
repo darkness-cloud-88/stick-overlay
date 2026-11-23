@@ -103,6 +103,7 @@ class OverlayService : Service() {
             eye?.alpha = if (hidden) .5f else 1f
             if (visiting) { if (hidden) hideControls() else showControls() }
         }
+        btn("✖", false) { stopSelf() }
         homeBtn = btn("🏠", false) { endVisit() }
         homeBtn?.visibility = View.GONE
         btn("🚪", false) { stage?.kickAll(); toast("أُخرج الزوار") }
@@ -118,7 +119,6 @@ class OverlayService : Service() {
             (fb?.background as? GradientDrawable)?.setColor(if (finger) 0xFF2F7DE1.toInt() else 0xAA222222.toInt())
             if (finger) Toast.makeText(this, "وضع الإصبع: المس الشاشة. اضغط 👆 مرة ثانية للخروج", Toast.LENGTH_LONG).show()
         }
-        btn("✖", false) { stopSelf() }
         val pp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
@@ -133,14 +133,14 @@ class OverlayService : Service() {
         val type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         val fl = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         val sv = Stick(this)
-        val p1 = WindowManager.LayoutParams((210 * d).toInt(), (230 * d).toInt(), type, fl, PixelFormat.TRANSLUCENT)
+        val p1 = WindowManager.LayoutParams((170 * d).toInt(), (170 * d).toInt(), type, fl, PixelFormat.TRANSLUCENT)
         p1.gravity = Gravity.BOTTOM or Gravity.LEFT
-        p1.y = (30 * d).toInt()
+        p1.y = (70 * d).toInt()
         val pb = PunchBtn(this)
         val p2 = WindowManager.LayoutParams((92 * d).toInt(), (92 * d).toInt(), type, fl, PixelFormat.TRANSLUCENT)
         p2.gravity = Gravity.BOTTOM or Gravity.RIGHT
         p2.x = (20 * d).toInt()
-        p2.y = (80 * d).toInt()
+        p2.y = (110 * d).toInt()
         try {
             wm.addView(sv, p1); stickW = sv
             wm.addView(pb, p2); punchW = pb
