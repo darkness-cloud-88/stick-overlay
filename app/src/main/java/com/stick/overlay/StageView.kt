@@ -5,6 +5,7 @@ import android.graphics.drawable.GradientDrawable
 import android.view.*
 import android.widget.*
 import org.json.JSONObject
+import org.json.JSONArray
 import kotlin.math.*
 
 object Puppet {
@@ -937,12 +938,28 @@ class StageView(ctx: Context) : View(ctx) {
         }
     }
 
+        private var netT = 0
+
+    private fun broadcast() {
+        val links = figs.filter { it.remote && it.link != null }
+        if (links.isEmpty()) return
+        val fa = JSONArray()
+        for (f in figs) {
+            val pa = JSONArray()
+            for (i in 0..10) { pa.put(f.jx[i].toInt()); pa.put(f.jy[i].toInt()) }
+            fa.put(JSONObject().put("n", f.name).put("sid", if (f.remote) f.sid else "").put("fc", if (f.face >= 0f) 1 else -1).put("p", pa))
+        }
+        val o = JSONObject().put("t", "st").put("w", width).put("h", height).put("s", s.toDouble()).put("g", ground.toInt()).put("f", fa)
+        for (f in links) f.link?.post(o)
+    }
     private fun tick() {
         if (pending.isNotEmpty() && width > 0) {
             val l = ArrayList<String>(pending)
             pending.clear()
             for (id in l) addFig(id)
         }
+        netT++
+if (netT >= 5) { netT = 0; broadcast() }
         for (f in figs) {
             step(f)
             if (f.mode != 4) {
