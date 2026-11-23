@@ -1,8 +1,6 @@
 package com.stick.overlay
 import android.content.Context
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
+import android.graphics.*
 import android.view.MotionEvent
 import android.view.View
 import org.json.JSONObject
@@ -11,6 +9,8 @@ import java.io.DataOutputStream
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.Socket
+import java.util.concurrent.Executors
+import kotlin.math.*
 
 object Ctl {
     @Volatile var dx = 0
@@ -46,7 +46,15 @@ object Net {
 class Link(val sock: Socket) {
     private val inp = DataInputStream(sock.getInputStream().buffered())
     private val out = DataOutputStream(sock.getOutputStream().buffered())
+    private val ex = Executors.newSingleThreadExecutor()
+    @Volatile private var pend = 0
     @Volatile var alive = true
+
+    fun post(o: JSONObject) {
+        if (!alive || pend > 2) return
+        pend++
+        try { ex.execute { try { send(o) } finally { pend-- } } } catch (e: Exception) { pend-- }
+    }
 
     fun send(o: JSONObject) {
         try {
@@ -75,6 +83,7 @@ class Link(val sock: Socket) {
     fun close() {
         alive = false
         try { sock.close() } catch (e: Exception) {}
+        try { ex.shutdownNow() } catch (e: Exception) {}
     }
 }
 
@@ -146,6 +155,63 @@ class PunchBtn(ctx: Context) : View(ctx) {
         p.textAlign = Paint.Align.CENTER
         p.textSize = 30f * d
         c.drawText("👊", r, r + 11f * d, p)
+    }
+}
+
+class Mini(ctx: Context, private val bm: Array<Bitmap>, private val mySid: String) : View(ctx) {
+    private val dn = ctx.resources.displayMetrics.density
+    private var fr: JSONObject? = null
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND; style = Paint.Style.STROKE }
+    private val bgp = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; textSize = 9f * dn; color = Color.WHITE }
+    private val jx = FloatArray(11)
+    private val jy = FloatArray(11)
+    private val cols = intArrayOf(0xFF7FB8FF.toInt(), 0xFFFF8F8F.toInt(), 0xFF8FE3A8.toInt(), 0xFFFFD27F.toInt(), 0xFFC7A8FF.toInt())
+    private val lk = arrayOf(
+        intArrayOf(0, 1), intArrayOf(1, 2), intArrayOf(1, 3), intArrayOf(3, 4), intArrayOf(1, 5),
+        intArrayOf(5, 6), intArrayOf(2, 7), intArrayOf(7, 8), intArrayOf(2, 9), intArrayOf(9, 10))
+
+    fun update(o: JSONObject) { fr = o; invalidate() }
+
+    override fun onDraw(c: Canvas) {
+        bgp.color = Color.argb(160, 18, 24, 34)
+        c.drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), 10f * dn, 10f * dn, bgp)
+        val o = fr
+        if (o == null) { c.drawText("...", width / 2f, height / 2f, tp); return }
+        val hw = max(o.optInt("w", 1), 1).toFloat()
+        val hh = max(o.optInt("h", 1), 1).toFloat()
+        val k = min(width / hw, height / hh)
+        val s = o.optDouble("s", 3.0).toFloat() * k
+        val g = o.optInt("g", 0) * k
+        p.color = Color.argb(150, 255, 255, 255)
+        p.strokeWidth = 1.5f * dn
+        c.drawLine(0f, g + 2f, width.toFloat(), g + 2f, p)
+        val arr = o.optJSONArray("f") ?: return
+        for (pass in 0..1) {
+            for (i in 0 until arr.length()) {
+                val f = arr.getJSONObject(i)
+                val mine = mySid.isNotEmpty() && f.optString("sid") == mySid
+                if (mine != (pass == 1)) continue
+                val pa = f.optJSONArray("p") ?: continue
+                if (pa.length() < 22) continue
+                for (j in 0..10) {
+                    jx[j] = pa.optDouble(2 * j).toFloat() * k
+                    jy[j] = pa.optDouble(2 * j + 1).toFloat() * k
+                }
+                val face = f.optInt("fc", 1).toFloat()
+                if (mine) Puppet.draw(c, bm, jx, jy, face, s)
+                else {
+                    p.color = cols[abs(f.optString("n").hashCode()) % cols.size]
+                    p.strokeWidth = max(1.5f * dn, 5f * s)
+                    for (l in lk) c.drawLine(jx[l[0]], jy[l[0]], jx[l[1]], jy[l[1]], p)
+                    c.drawCircle(jx[0], jy[0], 9f * s, p)
+                    c.drawText(f.optString("n"), jx[0], jy[0] - 14f * s, tp)
+                }
+            }
+        }
+        p.color = Color.argb(200, 47, 125, 225)
+        p.strokeWidth = 2f * dn
+        c.drawRoundRect(RectF(1f, 1f, width - 1f, height - 1f), 10f * dn, 10f * dn, p)
     }
 }
 // END
